@@ -43,7 +43,7 @@ coverage.xml
 
 # Environment variables
 .env
-.venv
+.venv/
 env/
 venv/
 ENV/

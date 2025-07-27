@@ -15,20 +15,49 @@ A powerful Python tool for automating WhatsApp Web interactions with LLM-powered
 
 ## Installation
 
-1. **Clone the repository** (see instructions below for creating private repo)
+### Prerequisites
+- Python 3.9+ 
+- Chrome browser (for WhatsApp Web automation)
+- [uv](https://docs.astral.sh/uv/) (modern Python package manager)
 
-2. **Install Python dependencies**:
+### Setup with uv (Recommended)
+
+1. **Clone the repository**:
    ```bash
-   pip install -r requirements.txt
+   git clone https://github.com/MJ141592/WhatsappControls.git
+   cd WhatsappControls
    ```
 
-3. **Set up environment variables**:
+2. **Create virtual environment with uv**:
+   ```bash
+   uv venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. **Install dependencies**:
+   ```bash
+   uv pip install -r requirements.txt
+   ```
+
+4. **Set up environment variables**:
    ```bash
    cp .env.example .env
    # Edit .env with your API keys and configuration
    ```
 
-4. **Install Chrome browser** (required for WhatsApp Web automation)
+### Alternative Setup (Traditional)
+
+If you don't have `uv` installed:
+
+```bash
+# Install uv first (recommended)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or use traditional pip
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
 ## Configuration
 
@@ -111,6 +140,7 @@ WhatsappControls/
 ├── .env.example          # Environment template
 ├── .gitignore            # Git ignore rules
 ├── README.md             # This file
+├── .venv/                # Virtual environment (created by uv)
 └── logs/                 # Log files (created automatically)
 ```
 
@@ -157,6 +187,10 @@ WhatsappControls/
    - Verify your API keys are correct
    - Check your API usage limits
    - Ensure you have sufficient credits
+
+4. **Virtual environment issues**:
+   - Make sure you've activated the venv: `source .venv/bin/activate`
+   - Reinstall dependencies: `uv pip install -r requirements.txt`
 
 ### Logs
 
