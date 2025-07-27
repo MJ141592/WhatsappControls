@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from abc import ABC, abstractmethod
 
+import httpx  # added for custom client with Anthropic
 import openai
 import anthropic
 from loguru import logger
@@ -58,11 +59,23 @@ class OpenAIClient(LLMClient):
             raise
 
 
+# --- Updated to supply our own httpx client (new httpx>=0.28 no longer supports
+#     the deprecated `proxies=` argument that Anthropic passes by default). By
+#     giving an `http_client` ourselves we bypass that inner logic and maintain
+#     compatibility without downgrading httpx.
+
+
 class AnthropicClient(LLMClient):
     """Anthropic API client."""
-    
+
     def __init__(self):
-        self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        # Provide a plain AsyncClient so Anthropic doesn't construct one with the
+        # obsolete `proxies` kwarg.
+        self._httpx_client = httpx.AsyncClient()
+        self.client = anthropic.AsyncAnthropic(
+            api_key=settings.anthropic_api_key,
+            http_client=self._httpx_client,
+        )
     
     async def generate_response(
         self, 
@@ -80,19 +93,23 @@ class AnthropicClient(LLMClient):
                         "content": msg["content"]
                     })
             
+            # Use Messages API (recommended by Anthropic)
             response = await self.client.messages.create(
                 model=settings.anthropic_model,
                 max_tokens=settings.max_tokens,
                 temperature=settings.temperature,
                 system=system_prompt or "You are a helpful assistant.",
-                messages=anthropic_messages
+                messages=anthropic_messages,
             )
-            
             return response.content[0].text.strip()
             
         except Exception as e:
             logger.error(f"Anthropic API error: {e}")
             raise
+
+    async def aclose(self):
+        """Cleanly close the underlying httpx client when done."""
+        await self._httpx_client.aclose()
 
 
 class LLMManager:

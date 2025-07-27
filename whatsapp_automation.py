@@ -13,7 +13,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, ElementNotInteractableException, NoSuchElementException
 from loguru import logger
 
 from config import settings
@@ -92,8 +92,31 @@ class WhatsAppAutomation:
     def select_chat(self, contact_name: str, chat_type: str = "individual") -> bool:
         """Select a chat by contact name."""
         try:
-            # 1. Search for the contact/group
-            search_box = self.driver.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="3"]')
+            # 1. Ensure the search input is visible & interactable
+            def _activate_search():
+                """Try clicking the sidebar search icon to reveal search box."""
+                try:
+                    search_icon = self.driver.find_element(By.CSS_SELECTOR, 'button[data-testid="chat-list-search"]')
+                    self.driver.execute_script("arguments[0].click();", search_icon)
+                    time.sleep(0.5)
+                except Exception:
+                    # fallback: try generic search svg/icon
+                    try:
+                        icon_generic = self.driver.find_element(By.CSS_SELECTOR, 'span[data-icon="search"]')
+                        self.driver.execute_script("arguments[0].click();", icon_generic)
+                        time.sleep(0.5)
+                    except Exception:
+                        pass
+
+            try:
+                search_box = self.driver.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="3"]')
+                if not (search_box.is_displayed() and search_box.is_enabled()):
+                    raise ElementNotInteractableException()
+            except (NoSuchElementException, ElementNotInteractableException):
+                _activate_search()
+                search_box = self.driver.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="3"]')
+
+            # Interact with search box
             search_box.click()
             search_box.clear()
             search_box.send_keys(Keys.CONTROL + "a", Keys.DELETE)
