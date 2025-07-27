@@ -63,6 +63,9 @@ logs/
 
 # Chrome profiles and WebDriver
 chrome_profile/
+path_to_your_chrome_profile/  # Specific folder created by automation
+*chrome_profile*/             # Any folder containing "chrome_profile"
+*profile*/                    # Any folder ending with "profile"
 chromedriver*
 geckodriver*
 
