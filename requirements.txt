@@ -10,6 +10,6 @@ requests==2.31.0
 pillow==10.1.0
 pandas==2.1.4
 loguru==0.7.2
-typer==0.9.0
+typer>=0.16.0
 rich==13.7.0
 schedule==1.2.0 
