@@ -13,7 +13,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
 from loguru import logger
 
 from config import settings
@@ -53,8 +52,8 @@ class WhatsAppAutomation:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         
-        # Install and setup ChromeDriver
-        service = Service(ChromeDriverManager().install())
+        # Use system ChromeDriver
+        service = Service("/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=chrome_options)
         
         return driver
@@ -86,9 +85,9 @@ class WhatsAppAutomation:
         
         # Wait for either QR code or main interface
         try:
-            # Check if already logged in
+            # Check if already logged in - look for chat list
             WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='chat-list']"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label*="Chat list"]'))
             )
             logger.info("Already logged in to WhatsApp Web")
             
@@ -96,29 +95,35 @@ class WhatsAppAutomation:
             # Need to scan QR code
             logger.info("Please scan the QR code to log in to WhatsApp Web...")
             
-            # Wait for login completion
+            # Wait for login completion - look for chat list
             WebDriverWait(self.driver, 60).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='chat-list']"))
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label*="Chat list"]'))
             )
             logger.info("Successfully logged in to WhatsApp Web")
     
     def get_chat_list(self) -> List[str]:
         """Get list of available chats."""
         try:
+            # Wait a bit for chats to load
+            time.sleep(3)
+            
+            # Find individual chat items using modern selector
             chat_elements = self.driver.find_elements(
                 By.CSS_SELECTOR, 
-                "[data-testid='chat-list'] [data-testid='cell-frame-container']"
+                'div[role="gridcell"]'
             )
             
             chats = []
             for element in chat_elements[:10]:  # Limit to first 10 chats
                 try:
-                    name_element = element.find_element(
-                        By.CSS_SELECTOR, 
-                        "[data-testid='cell-frame-title'] span[title]"
-                    )
-                    chats.append(name_element.get_attribute("title"))
-                except NoSuchElementException:
+                    # Try to get chat name from the element text
+                    text = element.text.strip()
+                    if text and len(text) > 0:
+                        # Get first line which is usually the chat name
+                        chat_name = text.split('\n')[0]
+                        if chat_name and chat_name not in chats:
+                            chats.append(chat_name)
+                except Exception:
                     continue
             
             return chats
@@ -130,26 +135,41 @@ class WhatsAppAutomation:
     def select_chat(self, chat_name: str) -> bool:
         """Select a specific chat by name."""
         try:
-            # Search for the chat
-            search_box = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='chat-list-search']"))
-            )
-            search_box.clear()
-            search_box.send_keys(chat_name)
+            # First try to find the search box
+            search_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="textbox"]')
             
-            time.sleep(2)  # Wait for search results
+            if search_elements:
+                search_box = search_elements[0]
+                search_box.clear()
+                search_box.send_keys(chat_name)
+                
+                time.sleep(2)  # Wait for search results
+                
+                # Click on the first result
+                chat_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="gridcell"]')
+                if chat_elements:
+                    chat_elements[0].click()
+                    
+                    # Clear search
+                    search_box.clear()
+                    
+                    logger.info(f"Selected chat: {chat_name}")
+                    return True
             
-            # Click on the first result
-            first_result = WebDriverWait(self.driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='chat-list'] [data-testid='cell-frame-container']"))
-            )
-            first_result.click()
+            # Alternative method: find chat directly by text content
+            chat_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="gridcell"]')
             
-            # Clear search
-            search_box.clear()
+            for element in chat_elements:
+                try:
+                    if chat_name.lower() in element.text.lower():
+                        element.click()
+                        logger.info(f"Selected chat: {chat_name}")
+                        return True
+                except Exception:
+                    continue
             
-            logger.info(f"Selected chat: {chat_name}")
-            return True
+            logger.warning(f"Chat '{chat_name}' not found")
+            return False
             
         except Exception as e:
             logger.error(f"Failed to select chat '{chat_name}': {e}")
@@ -158,19 +178,176 @@ class WhatsAppAutomation:
     def send_message(self, message: str) -> bool:
         """Send a message to the currently selected chat."""
         try:
-            message_box = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-testid='conversation-compose-box-input']"))
-            )
+            # Find the specific message input box (not the search box)
+            message_selectors = [
+                'div[contenteditable="true"][aria-label="Type a message"]',  # Specific message input
+                'div[contenteditable="true"][data-tab="10"]',  # Alternative: by data-tab
+                'div[contenteditable="true"][role="textbox"]:not([aria-label*="Search"])',  # Not search
+            ]
             
+            message_box = None
+            for selector in message_selectors:
+                try:
+                    elements = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    # Find the one that's actually visible and in the right position
+                    for elem in elements:
+                        if elem.is_displayed():
+                            location = elem.location
+                            # Message input should be lower on the page (y > 400)
+                            if location['y'] > 400:
+                                message_box = elem
+                                logger.info(f"Found message input using: {selector}")
+                                break
+                    
+                    if message_box:
+                        break
+                        
+                except TimeoutException:
+                    continue
+            
+            if not message_box:
+                # Fallback: find any contenteditable that's not the search box
+                all_editable = self.driver.find_elements(By.CSS_SELECTOR, 'div[contenteditable="true"]')
+                for elem in all_editable:
+                    if elem.is_displayed():
+                        location = elem.location
+                        aria_label = elem.get_attribute('aria-label') or ''
+                        
+                        # Skip search boxes
+                        if 'search' in aria_label.lower():
+                            continue
+                            
+                        # Use the one that's lower on the page
+                        if location['y'] > 400:
+                            message_box = elem
+                            logger.info("Found message input using fallback method")
+                            break
+            
+            if not message_box:
+                logger.error("Could not find message input box")
+                return False
+            
+            # Focus the input properly
+            message_box.click()
+            time.sleep(0.5)
+            
+            # Clear any existing content multiple ways
             message_box.clear()
-            message_box.send_keys(message)
             
-            # Send the message
-            send_button = self.driver.find_element(By.CSS_SELECTOR, "[data-testid='send']")
-            send_button.click()
+            # Use JavaScript to clear if needed
+            self.driver.execute_script("arguments[0].innerHTML = '';", message_box)
+            time.sleep(0.5)
             
-            logger.info(f"Sent message: {message[:50]}...")
-            return True
+            # Type the message character by character for reliability
+            for char in message:
+                message_box.send_keys(char)
+                time.sleep(0.02)  # Small delay between characters
+            
+            time.sleep(1)  # Wait for message to be fully typed
+            
+            # Verify the message was typed
+            current_text = message_box.text or message_box.get_attribute('textContent') or ''
+            if message not in current_text:
+                logger.warning("Message not properly entered, retrying...")
+                message_box.clear()
+                self.driver.execute_script("arguments[0].innerHTML = '';", message_box)
+                message_box.send_keys(message)
+                time.sleep(1)
+            
+            # Try multiple send methods
+            sent = False
+            
+            # Method 1: Enter key (most reliable)
+            try:
+                from selenium.webdriver.common.keys import Keys
+                message_box.send_keys(Keys.RETURN)
+                time.sleep(1)
+                
+                # Check if message was sent (input should be empty)
+                new_text = message_box.text or message_box.get_attribute('textContent') or ''
+                if not new_text.strip():
+                    logger.info(f"Sent message via Enter key: {message[:50]}...")
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"Enter key method failed: {e}")
+            
+            # Method 2: Look for send button with more patterns
+            send_selectors = [
+                'button[aria-label*="Send"]',
+                'span[data-icon="send"]',
+                'button[data-icon="send"]',
+                '[data-testid="send"]',
+                'button[title*="Send"]',
+                'span[title*="Send"]',
+                'button[aria-label*="send"]',  # case insensitive
+                'div[role="button"][aria-label*="Send"]',
+                'svg[data-icon="send"]',
+                'button:has(span[data-icon="send"])',
+            ]
+            
+            for selector in send_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            element.click()
+                            time.sleep(1)
+                            
+                            # Check if message was sent
+                            new_text = message_box.text or message_box.get_attribute('textContent') or ''
+                            if not new_text.strip():
+                                logger.info(f"Sent message via button ({selector}): {message[:50]}...")
+                                return True
+                except Exception:
+                    continue
+            
+            # Method 3: Try Ctrl+Enter
+            try:
+                message_box.send_keys(Keys.CONTROL + Keys.RETURN)
+                time.sleep(1)
+                
+                new_text = message_box.text or message_box.get_attribute('textContent') or ''
+                if not new_text.strip():
+                    logger.info(f"Sent message via Ctrl+Enter: {message[:50]}...")
+                    return True
+                    
+            except Exception as e:
+                logger.warning(f"Ctrl+Enter method failed: {e}")
+            
+            # Method 4: JavaScript click on any element that might be the send button
+            try:
+                # Find any clickable element near the input that might be send button
+                possible_send_elements = self.driver.find_elements(
+                    By.CSS_SELECTOR, 
+                    'button, span[data-icon], div[role="button"]'
+                )
+                
+                for element in possible_send_elements:
+                    try:
+                        # Check if element is in the right area (near message input)
+                        if element.is_displayed():
+                            # Try clicking with JavaScript
+                            self.driver.execute_script("arguments[0].click();", element)
+                            time.sleep(1)
+                            
+                            # Check if message was sent
+                            new_text = message_box.text or message_box.get_attribute('textContent') or ''
+                            if not new_text.strip():
+                                logger.info(f"Sent message via JS click: {message[:50]}...")
+                                return True
+                    except:
+                        continue
+                        
+            except Exception as e:
+                logger.warning(f"JavaScript click method failed: {e}")
+            
+            # If we get here, none of the methods worked
+            logger.error("All send methods failed")
+            return False
             
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
@@ -179,35 +356,50 @@ class WhatsAppAutomation:
     def get_recent_messages(self, limit: int = 10) -> List[WhatsAppMessage]:
         """Get recent messages from the current chat."""
         try:
-            message_elements = self.driver.find_elements(
-                By.CSS_SELECTOR, 
-                "[data-testid='conversation-panel-messages'] [data-testid='msg-container']"
-            )
+            # Look for message containers - try multiple selectors
+            message_selectors = [
+                'div[data-id]',  # Common message container
+                'div[class*="message"]',  # Any element with "message" in class
+                '.copyable-text',  # Traditional selector that might still work
+            ]
+            
+            message_elements = []
+            for selector in message_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        message_elements = elements
+                        break
+                except:
+                    continue
             
             messages = []
             for element in message_elements[-limit:]:
                 try:
-                    # Determine if message is outgoing
-                    is_outgoing = "message-out" in element.get_attribute("class")
+                    # Try to determine if message is outgoing
+                    is_outgoing = False
+                    try:
+                        # Check various indicators for outgoing messages
+                        class_attr = element.get_attribute("class") or ""
+                        if "message-out" in class_attr or "msg-out" in class_attr:
+                            is_outgoing = True
+                    except:
+                        pass
                     
                     # Get message content
-                    content_element = element.find_element(
-                        By.CSS_SELECTOR, 
-                        ".copyable-text span"
-                    )
-                    content = content_element.text
-                    
-                    # Create message object
-                    message = WhatsAppMessage(
-                        sender="You" if is_outgoing else "Contact",
-                        content=content,
-                        timestamp=datetime.now(),
-                        is_outgoing=is_outgoing,
-                        chat_name="Current Chat"
-                    )
-                    
-                    messages.append(message)
-                    
+                    content = element.text.strip()
+                    if content:
+                        # Create message object
+                        message = WhatsAppMessage(
+                            sender="You" if is_outgoing else "Contact",
+                            content=content,
+                            timestamp=datetime.now(),
+                            is_outgoing=is_outgoing,
+                            chat_name="Current Chat"
+                        )
+                        
+                        messages.append(message)
+                        
                 except Exception:
                     continue
             
@@ -295,7 +487,8 @@ async def send_message_to_contact(contact_name: str, message: str) -> bool:
     automation = WhatsAppAutomation()
     
     try:
-        await automation.start()
+        automation.driver = automation.setup_driver()
+        await automation.connect_to_whatsapp()
         
         if automation.select_chat(contact_name):
             result = automation.send_message(message)
@@ -316,7 +509,8 @@ async def get_chat_messages(contact_name: str, limit: int = 10) -> List[WhatsApp
     automation = WhatsAppAutomation()
     
     try:
-        await automation.start()
+        automation.driver = automation.setup_driver()
+        await automation.connect_to_whatsapp()
         
         if automation.select_chat(contact_name):
             messages = automation.get_recent_messages(limit)
