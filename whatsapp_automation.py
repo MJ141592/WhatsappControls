@@ -365,7 +365,27 @@ class WhatsAppAutomation:
                     except:
                         pass
                     
+                    # Determine sender properly in group chats
                     sender = "You" if is_outgoing else chat_name
+                    if not is_outgoing:
+                        # Look for a span/div with data-pre-plain-text just before or inside elem
+                        meta_elem = None
+                        try:
+                            meta_elem = elem.find_element(By.XPATH, './preceding-sibling::*[@data-pre-plain-text][1]')
+                        except Exception:
+                            try:
+                                meta_elem = elem.find_element(By.XPATH, './/*[@data-pre-plain-text]')
+                            except Exception:
+                                meta_elem = None
+                        if meta_elem:
+                            pre_plain = meta_elem.get_attribute('data-pre-plain-text') or ''
+                            if ']' in pre_plain and ':' in pre_plain:
+                                try:
+                                    sender_candidate = pre_plain.split(']')[1].split(':')[0].strip()
+                                    if sender_candidate:
+                                        sender = sender_candidate
+                                except Exception:
+                                    pass
                     
                     message = WhatsAppMessage(
                         sender=sender,
