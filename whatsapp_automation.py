@@ -1,18 +1,19 @@
-"""WhatsApp Web automation using Selenium."""
+"""Simplified WhatsApp Web automation using Selenium."""
 
 import time
 import asyncio
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 from loguru import logger
 
 from config import settings
@@ -30,33 +31,26 @@ class WhatsAppMessage:
 
 
 class WhatsAppAutomation:
-    """Main class for WhatsApp Web automation."""
+    """Simplified WhatsApp Web automation."""
     
     def __init__(self):
         self.driver: Optional[webdriver.Chrome] = None
         self.llm_manager = LLMManager()
-        self.message_history: Dict[str, List[WhatsAppMessage]] = {}
         self.processed_messages: set = set()
         
     def setup_driver(self) -> webdriver.Chrome:
-        """Set up Chrome WebDriver with appropriate options."""
+        """Set up Chrome WebDriver."""
         chrome_options = Options()
         
-        # Use existing Chrome profile if specified
         if settings.chrome_profile_path:
             chrome_options.add_argument(f"--user-data-dir={settings.chrome_profile_path}")
         
-        # Additional Chrome options for stability
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         
-        # Use system ChromeDriver
         service = Service("/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
-        return driver
+        return webdriver.Chrome(service=service, options=chrome_options)
     
     async def start(self):
         """Start the WhatsApp automation."""
@@ -67,311 +61,247 @@ class WhatsAppAutomation:
             await self.connect_to_whatsapp()
             
             if settings.auto_reply_enabled:
-                await self.start_message_monitoring()
+                await self.start_monitoring()
             else:
-                logger.info("Auto-reply is disabled. Use manual methods to send messages.")
+                logger.info("Auto-reply disabled. Use manual methods to send messages.")
                 
         except Exception as e:
-            logger.error(f"Failed to start WhatsApp automation: {e}")
-            if self.driver:
-                self.driver.quit()
+            logger.error(f"Failed to start: {e}")
+            await self.stop()
             raise
     
     async def connect_to_whatsapp(self):
-        """Connect to WhatsApp Web and wait for QR code scan if needed."""
+        """Connect to WhatsApp Web."""
         logger.info("Connecting to WhatsApp Web...")
-        
         self.driver.get("https://web.whatsapp.com")
         
-        # Wait for either QR code or main interface
         try:
-            # Check if already logged in - look for chat list
+            # Check if already logged in
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label*="Chat list"]'))
             )
-            logger.info("Already logged in to WhatsApp Web")
+            logger.info("Already logged in")
             
         except TimeoutException:
-            # Need to scan QR code
-            logger.info("Please scan the QR code to log in to WhatsApp Web...")
-            
-            # Wait for login completion - look for chat list
+            logger.info("Please scan QR code...")
             WebDriverWait(self.driver, 60).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label*="Chat list"]'))
             )
-            logger.info("Successfully logged in to WhatsApp Web")
+            logger.info("Successfully logged in")
     
-    def get_chat_list(self) -> List[str]:
-        """Get list of available chats."""
+    def select_chat(self, contact_name: str, chat_type: str = "individual") -> bool:
+        """Select a chat by contact name."""
         try:
-            # Wait a bit for chats to load
-            time.sleep(3)
+            # 1. Search for the contact/group
+            search_box = self.driver.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="3"]')
+            search_box.click()
+            search_box.clear()
+            search_box.send_keys(Keys.CONTROL + "a", Keys.DELETE)
+            search_box.send_keys(contact_name)
+            time.sleep(1)
             
-            # Find individual chat items using modern selector
-            chat_elements = self.driver.find_elements(
-                By.CSS_SELECTOR, 
-                'div[role="gridcell"]'
+            # Quick keyboard selection – press ENTER to open the first/highlighted result
+            search_box.send_keys(Keys.RETURN)
+            time.sleep(2)
+
+            # If chat still not open, try Arrow-Down + ENTER
+            if not self._verify_chat_opened():
+                search_box.send_keys(Keys.ARROW_DOWN, Keys.RETURN)
+                time.sleep(2)
+
+            # Verify again
+            if self._verify_chat_opened():
+                logger.info(f"Successfully opened {chat_type} chat via keyboard: {contact_name}")
+                return True
+
+            # 2. Find the correct search result
+            results = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="listitem"]')
+            target_element = None
+            for result in results:
+                result_text = result.text.lower()
+                if contact_name.lower() in result_text:
+                    group_indicators = ['group', 'participants', 'members', 'in common']
+                    is_group = any(indicator in result_text for indicator in group_indicators)
+                    
+                    if chat_type == "individual" and not is_group:
+                        target_element = result
+                        break
+                    elif chat_type == "group" and is_group:
+                        target_element = result
+                        break
+            
+            if not target_element:
+                logger.error(f"Could not find a matching {chat_type} in search results.")
+                return False
+
+            # 3. Click the result reliably and verify
+            logger.info(f"Found '{target_element.text.splitlines()[0]}'. Attempting to open chat...")
+            self.driver.execute_script("arguments[0].click();", target_element)
+            
+            if self._verify_chat_opened():
+                logger.info(f"Successfully opened {chat_type} chat.")
+                return True
+            else:
+                logger.error("Clicked on search result, but chat did not open.")
+                return False
+
+        except Exception as e:
+            logger.error(f"Failed to select {chat_type} chat for '{contact_name}': {e}")
+            return False
+    
+    def _verify_chat_opened(self) -> bool:
+        """Verify a chat is open by reliably finding the message compose box."""
+        try:
+            # Wait up to 5 seconds for the compose box to appear
+            wait = WebDriverWait(self.driver, 5)
+            compose_box = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'))
             )
-            
-            chats = []
-            for element in chat_elements[:10]:  # Limit to first 10 chats
-                try:
-                    # Try to get chat name from the element text
-                    text = element.text.strip()
-                    if text and len(text) > 0:
-                        # Get first line which is usually the chat name
-                        chat_name = text.split('\n')[0]
-                        if chat_name and chat_name not in chats:
-                            chats.append(chat_name)
-                except Exception:
-                    continue
-            
-            return chats
-            
-        except Exception as e:
-            logger.error(f"Failed to get chat list: {e}")
-            return []
+            # Ensure it's visible and at the bottom of the screen
+            if compose_box and compose_box.is_displayed() and compose_box.location['y'] > 400:
+                return True
+        except TimeoutException:
+            logger.debug("Verification failed: Could not find message compose box.")
+            return False
+        return False
     
-    def select_chat(self, chat_name: str) -> bool:
-        """Select a specific chat by name."""
-        try:
-            # First try to find the search box
-            search_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="textbox"]')
-            
-            if search_elements:
-                search_box = search_elements[0]
-                search_box.clear()
-                search_box.send_keys(chat_name)
-                
-                time.sleep(2)  # Wait for search results
-                
-                # Click on the first result
-                chat_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="gridcell"]')
-                if chat_elements:
-                    chat_elements[0].click()
-                    
-                    # Clear search
-                    search_box.clear()
-                    
-                    logger.info(f"Selected chat: {chat_name}")
-                    return True
-            
-            # Alternative method: find chat directly by text content
-            chat_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="gridcell"]')
-            
-            for element in chat_elements:
-                try:
-                    if chat_name.lower() in element.text.lower():
-                        element.click()
-                        logger.info(f"Selected chat: {chat_name}")
+    def _check_message_compose(self) -> bool:
+        """Check for message compose elements."""
+        compose_selectors = [
+            'div[contenteditable="true"][data-tab="10"]',
+            'div[contenteditable="true"][aria-label*="Type a message"]',
+            'div[contenteditable="true"][aria-label*="type a message"]',
+            'div[data-testid="conversation-compose-box-input"]',
+            'div[contenteditable="true"]'
+        ]
+        
+        for selector in compose_selectors:
+            try:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                for elem in elements:
+                    if elem.is_displayed() and elem.location['y'] > 300:
                         return True
-                except Exception:
-                    continue
-            
-            logger.warning(f"Chat '{chat_name}' not found")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to select chat '{chat_name}': {e}")
-            return False
+            except:
+                continue
+        return False
+    
+    def _check_chat_header(self) -> bool:
+        """Check for chat header elements."""
+        header_selectors = [
+            'header[data-testid="conversation-header"]',
+            'header span[title]',
+            'div[data-testid="conversation-info-header"]',
+            'header'
+        ]
+        
+        for selector in header_selectors:
+            try:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                for elem in elements:
+                    if elem.is_displayed() and elem.location['y'] < 200:
+                        return True
+            except:
+                continue
+        return False
+    
+    def _check_message_area(self) -> bool:
+        """Check for message display area."""
+        message_selectors = [
+            '[data-testid="conversation-panel-body"]',
+            'div[class*="message"]',
+            '[data-testid="msg-container"]'
+        ]
+        
+        for selector in message_selectors:
+            try:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    return True
+            except:
+                continue
+        return False
     
     def send_message(self, message: str) -> bool:
-        """Send a message to the currently selected chat."""
+        """Send a message to current chat."""
         try:
-            # Find the specific message input box (not the search box)
-            message_selectors = [
-                'div[contenteditable="true"][aria-label="Type a message"]',  # Specific message input
-                'div[contenteditable="true"][data-tab="10"]',  # Alternative: by data-tab
-                'div[contenteditable="true"][role="textbox"]:not([aria-label*="Search"])',  # Not search
+            # Wait a moment for chat to fully load
+            time.sleep(2)
+            
+            # Try multiple selectors for message input
+            input_selectors = [
+                'div[contenteditable="true"][data-tab="10"]',  # Original
+                'div[contenteditable="true"][aria-label*="Type a message"]',  # By aria-label
+                'div[contenteditable="true"][aria-label*="type a message"]',  # Case variation
+                'div[contenteditable="true"][role="textbox"]',  # By role
+                'div[data-testid="conversation-compose-box-input"]',  # Possible new selector
+                'div[contenteditable="true"][data-tab]',  # Any data-tab
+                'div[contenteditable="true"]',  # Generic fallback
+                '[data-testid="compose-btn"]',  # Compose button area
+                'div[aria-label*="Message"]',  # Any element with Message in aria-label
+                'div[placeholder*="Type"]',  # Placeholder text
+                'div[class*="compose"]',  # Class-based
+                'div[class*="input"]',  # Input class
+                'textarea',  # Textarea elements
+                'input[type="text"]'  # Text inputs
             ]
             
             message_box = None
-            for selector in message_selectors:
-                try:
-                    elements = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_all_elements_located((By.CSS_SELECTOR, selector))
-                    )
-                    
-                    # Find the one that's actually visible and in the right position
-                    for elem in elements:
-                        if elem.is_displayed():
-                            location = elem.location
-                            # Message input should be lower on the page (y > 400)
-                            if location['y'] > 400:
-                                message_box = elem
-                                logger.info(f"Found message input using: {selector}")
-                                break
-                    
-                    if message_box:
-                        break
-                        
-                except TimeoutException:
-                    continue
             
-            if not message_box:
-                # Fallback: find any contenteditable that's not the search box
-                all_editable = self.driver.find_elements(By.CSS_SELECTOR, 'div[contenteditable="true"]')
-                for elem in all_editable:
-                    if elem.is_displayed():
-                        location = elem.location
-                        aria_label = elem.get_attribute('aria-label') or ''
-                        
-                        # Skip search boxes
-                        if 'search' in aria_label.lower():
-                            continue
-                            
-                        # Use the one that's lower on the page
-                        if location['y'] > 400:
-                            message_box = elem
-                            logger.info("Found message input using fallback method")
-                            break
-            
-            if not message_box:
-                logger.error("Could not find message input box")
-                return False
-            
-            # Focus the input properly
-            message_box.click()
-            time.sleep(0.5)
-            
-            # Clear any existing content multiple ways
-            message_box.clear()
-            
-            # Use JavaScript to clear if needed
-            self.driver.execute_script("arguments[0].innerHTML = '';", message_box)
-            time.sleep(0.5)
-            
-            # Type the message character by character for reliability
-            for char in message:
-                message_box.send_keys(char)
-                time.sleep(0.02)  # Small delay between characters
-            
-            time.sleep(1)  # Wait for message to be fully typed
-            
-            # Verify the message was typed
-            current_text = message_box.text or message_box.get_attribute('textContent') or ''
-            if message not in current_text:
-                logger.warning("Message not properly entered, retrying...")
-                message_box.clear()
-                self.driver.execute_script("arguments[0].innerHTML = '';", message_box)
-                message_box.send_keys(message)
-                time.sleep(1)
-            
-            # Try multiple send methods
-            sent = False
-            
-            # Method 1: Enter key (most reliable)
-            try:
-                from selenium.webdriver.common.keys import Keys
-                message_box.send_keys(Keys.RETURN)
-                time.sleep(1)
-                
-                # Check if message was sent (input should be empty)
-                new_text = message_box.text or message_box.get_attribute('textContent') or ''
-                if not new_text.strip():
-                    logger.info(f"Sent message via Enter key: {message[:50]}...")
-                    return True
-                    
-            except Exception as e:
-                logger.warning(f"Enter key method failed: {e}")
-            
-            # Method 2: Look for send button with more patterns
-            send_selectors = [
-                'button[aria-label*="Send"]',
-                'span[data-icon="send"]',
-                'button[data-icon="send"]',
-                '[data-testid="send"]',
-                'button[title*="Send"]',
-                'span[title*="Send"]',
-                'button[aria-label*="send"]',  # case insensitive
-                'div[role="button"][aria-label*="Send"]',
-                'svg[data-icon="send"]',
-                'button:has(span[data-icon="send"])',
-            ]
-            
-            for selector in send_selectors:
+            for selector in input_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        if element.is_displayed() and element.is_enabled():
-                            element.click()
-                            time.sleep(1)
-                            
-                            # Check if message was sent
-                            new_text = message_box.text or message_box.get_attribute('textContent') or ''
-                            if not new_text.strip():
-                                logger.info(f"Sent message via button ({selector}): {message[:50]}...")
-                                return True
+                    for elem in elements:
+                        # Make sure it's the message input (bottom half of page, visible)
+                        if elem.location['y'] > 200 and elem.is_displayed() and elem.is_enabled():
+                            message_box = elem
+                            logger.info(f"Found message input using {selector}")
+                            break
+                    if message_box:
+                        break
                 except Exception:
                     continue
             
-            # Method 3: Try Ctrl+Enter
-            try:
-                message_box.send_keys(Keys.CONTROL + Keys.RETURN)
-                time.sleep(1)
-                
-                new_text = message_box.text or message_box.get_attribute('textContent') or ''
-                if not new_text.strip():
-                    logger.info(f"Sent message via Ctrl+Enter: {message[:50]}...")
-                    return True
-                    
-            except Exception as e:
-                logger.warning(f"Ctrl+Enter method failed: {e}")
+            if not message_box:
+                logger.error("Could not find message input box")
+                # Debug: print page source if input not found
+                try:
+                    page_source = self.driver.page_source
+                    with open("logs/page_source.html", "w") as f:
+                        f.write(page_source)
+                    logger.debug("Saved page source to logs/page_source.html for debugging")
+                except Exception as e:
+                    logger.error(f"Failed to save page source: {e}")
+                return False
             
-            # Method 4: JavaScript click on any element that might be the send button
-            try:
-                # Find any clickable element near the input that might be send button
-                possible_send_elements = self.driver.find_elements(
-                    By.CSS_SELECTOR, 
-                    'button, span[data-icon], div[role="button"]'
-                )
-                
-                for element in possible_send_elements:
-                    try:
-                        # Check if element is in the right area (near message input)
-                        if element.is_displayed():
-                            # Try clicking with JavaScript
-                            self.driver.execute_script("arguments[0].click();", element)
-                            time.sleep(1)
-                            
-                            # Check if message was sent
-                            new_text = message_box.text or message_box.get_attribute('textContent') or ''
-                            if not new_text.strip():
-                                logger.info(f"Sent message via JS click: {message[:50]}...")
-                                return True
-                    except:
-                        continue
-                        
-            except Exception as e:
-                logger.warning(f"JavaScript click method failed: {e}")
+            message_box.click()
+            time.sleep(0.3)
+            message_box.clear()
+            message_box.send_keys(message)
+            time.sleep(0.5)
+            message_box.send_keys(Keys.RETURN)
+            time.sleep(1)
             
-            # If we get here, none of the methods worked
-            logger.error("All send methods failed")
-            return False
+            # Keep connection open for 2 extra seconds to ensure message sends
+            time.sleep(2)
+            
+            logger.info(f"Message sent: {message[:50]}...")
+            return True
             
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
             return False
     
     def get_recent_messages(self, limit: int = 10) -> List[WhatsAppMessage]:
-        """Get recent messages from the current chat."""
+        """Get recent messages from current chat."""
         try:
-            # Wait a bit for messages to load
-            time.sleep(2)
-            
-            # Target the actual message bubbles, not container elements
+            # Try multiple selectors for message containers
             message_selectors = [
-                # Target the actual message bubble elements
-                'div[class*="message-"]',  # Message bubble classes
-                'div[class*="_akbu"]:has(span)',  # Message bubbles with text content
-                'div[data-id][class*="copyable-text"]',  # Copyable text containers
-                '.copyable-text',  # Traditional message text containers
-                'div[class*="tail-"]',  # Message tail indicators (left/right alignment)
-                # More specific bubble selectors
-                'div[class*="_akbu"] > div[class*="_akbv"]',  # Nested message content
-                'span[class*="copyable-text"]',  # Text span elements
-                # Fallback - but filter for actual message content
-                'div[data-id*="BAE5"]',  # WhatsApp message containers
+                '[data-testid="msg-container"]',  # Original
+                'div[class*="message"]',  # Class-based
+                'div[data-id]',  # Data-id based
+                'div[class*="copyable-text"]',  # Copyable text
+                'div[role="row"]',  # Role-based
+                'span.selectable-text'  # Direct text spans
             ]
             
             message_elements = []
@@ -380,361 +310,153 @@ class WhatsAppAutomation:
             for selector in message_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    # Filter elements to ensure they contain actual message content
-                    valid_elements = []
-                    for elem in elements:
-                        text = elem.text.strip()
-                        if text and len(text) > 0 and not self._is_timestamp_or_status(text):
-                            # Additional check: make sure element has reasonable dimensions
-                            try:
-                                size = elem.size
-                                location = elem.location
-                                if size['width'] > 50 and size['height'] > 10:  # Reasonable message size
-                                    valid_elements.append(elem)
-                            except:
-                                continue
-                    
-                    if len(valid_elements) > 0:
-                        message_elements = valid_elements
+                    if elements:
+                        message_elements = elements
                         working_selector = selector
-                        logger.info(f"Found {len(valid_elements)} valid messages using selector: {selector}")
+                        logger.info(f"Found {len(elements)} message elements using {selector}")
                         break
                 except Exception:
                     continue
             
-            # If we still don't have good elements, try a different approach
             if not message_elements:
-                logger.info("Trying alternative approach: looking for message containers with position differences")
-                try:
-                    # Get all potential message elements
-                    all_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-id], div[class*="message"], span[class*="copyable"]')
-                    
-                    # Group by position to find actual message bubbles
-                    position_groups = {}
-                    for elem in all_elements:
-                        try:
-                            text = elem.text.strip()
-                            if text and len(text) > 0:
-                                location = elem.location
-                                size = elem.size
-                                pos_key = f"{location['x']}-{size['width']}"
-                                
-                                if pos_key not in position_groups:
-                                    position_groups[pos_key] = []
-                                position_groups[pos_key].append(elem)
-                        except:
-                            continue
-                    
-                    # Look for groups with different positions (indicating left vs right alignment)
-                    for pos_key, elements in position_groups.items():
-                        if len(elements) > 1:  # Multiple messages with same position pattern
-                            message_elements.extend(elements[:limit])  # Limit to avoid too many
-                            logger.info(f"Found {len(elements)} messages with position pattern: {pos_key}")
-                            break
-                    
-                except Exception as e:
-                    logger.warning(f"Alternative approach failed: {e}")
-            
-            if not message_elements:
-                logger.warning("No message elements found with any selector")
+                logger.error("No message elements found with any selector")
                 return []
             
             messages = []
-            chat_title = self._get_current_chat_name()
+            chat_name = self._get_current_chat_name()
             
-            # Process the most recent messages
-            recent_elements = message_elements[-limit:] if len(message_elements) > limit else message_elements
-            
-            for i, element in enumerate(recent_elements):
+            for elem in message_elements[-limit:]:
                 try:
-                    # Get message content
-                    content = element.text.strip()
+                    # Try to get text content
+                    content = ""
+                    text_selectors = ['span.selectable-text', 'span', 'div']
                     
-                    # Skip if no content found or it's a status message
-                    if not content or len(content.strip()) == 0 or self._is_timestamp_or_status(content):
+                    for text_sel in text_selectors:
+                        try:
+                            content_elem = elem.find_element(By.CSS_SELECTOR, text_sel)
+                            content = content_elem.text.strip()
+                            if content:
+                                break
+                        except:
+                            continue
+                    
+                    # If no content found, try getting text directly
+                    if not content:
+                        content = elem.text.strip()
+                    
+                    if not content or len(content) < 2:
                         continue
                     
-                    # Clean up content (remove timestamps, extra whitespace)
-                    content_lines = content.split('\n')
-                    actual_message = ""
-                    for line in content_lines:
-                        line = line.strip()
-                        if line and not self._is_timestamp_or_status(line):
-                            if len(line) > len(actual_message):
-                                actual_message = line
+                    # Determine if outgoing - try multiple ways
+                    is_outgoing = False
+                    try:
+                        elem_class = elem.get_attribute("class") or ""
+                        parent_class = elem.find_element(By.XPATH, './..').get_attribute("class") or ""
+                        
+                        if "message-out" in elem_class or "message-out" in parent_class:
+                            is_outgoing = True
+                        elif "message-in" in elem_class or "message-in" in parent_class:
+                            is_outgoing = False
+                        else:
+                            # Position-based detection as fallback
+                            location = elem.location
+                            window_width = self.driver.get_window_size()['width']
+                            is_outgoing = (location['x'] + elem.size['width']) > (window_width * 0.6)
+                    except:
+                        pass
                     
-                    if not actual_message:
-                        actual_message = content.split('\n')[0].strip()  # Fallback to first line
+                    sender = "You" if is_outgoing else chat_name
                     
-                    # Skip if message is too short or looks like metadata
-                    if len(actual_message) < 2:
-                        continue
-                    
-                    # Determine if message is outgoing
-                    is_outgoing = self._is_outgoing_message(element)
-                    
-                    # Get timestamp (approximate)
-                    timestamp = self._extract_timestamp(element) or datetime.now()
-                    
-                    # Create message object
                     message = WhatsAppMessage(
-                        sender="You" if is_outgoing else chat_title or "Contact",
-                        content=actual_message,
-                        timestamp=timestamp,
+                        sender=sender,
+                        content=content,
+                        timestamp=datetime.now(),
                         is_outgoing=is_outgoing,
-                        chat_name=chat_title or "Current Chat"
+                        chat_name=chat_name
                     )
                     
                     messages.append(message)
                     
-                except Exception as e:
-                    logger.debug(f"Error processing message element {i}: {e}")
+                except Exception:
                     continue
             
-            logger.info(f"Successfully parsed {len(messages)} messages from {len(recent_elements)} elements")
+            logger.info(f"Successfully retrieved {len(messages)} messages")
             return messages
             
         except Exception as e:
-            logger.error(f"Failed to get recent messages: {e}")
+            logger.error(f"Failed to get messages: {e}")
             return []
     
     def _get_current_chat_name(self) -> str:
-        """Get the name of the currently open chat."""
+        """Get current chat name."""
         try:
-            # Try multiple selectors for chat title
-            title_selectors = [
-                'header span[title]',  # Chat title in header
-                'header [data-testid="conversation-info-header-chat-title"]',
-                'header h1',
-                '[data-testid="conversation-header"] span',
-            ]
-            
-            for selector in title_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        title = element.get_attribute('title') or element.text.strip()
-                        if title and len(title) > 0:
-                            return title
-                except:
-                    continue
-                    
-            return "Unknown Chat"
-            
-        except Exception:
+            title_elem = self.driver.find_element(By.CSS_SELECTOR, 'header span[title]')
+            return title_elem.get_attribute('title') or title_elem.text
+        except:
             return "Unknown Chat"
     
-    def _is_outgoing_message(self, element) -> bool:
-        """Determine if a message element is an outgoing message."""
-        try:
-            # Method 1: Check class attributes for explicit indicators
-            class_attr = element.get_attribute("class") or ""
-            
-            # Check for explicit incoming indicators first
-            incoming_indicators = ["message-in", "msg-in", "incoming", "received", "tail-in"]
-            for indicator in incoming_indicators:
-                if indicator in class_attr:
-                    return False
-            
-            # Check for explicit outgoing indicators
-            outgoing_indicators = ["message-out", "msg-out", "outgoing", "sent", "tail-out"]
-            for indicator in outgoing_indicators:
-                if indicator in class_attr:
-                    return True
-            
-            # Method 2: Check data-id attributes
-            data_id = element.get_attribute("data-id") or ""
-            if "out" in data_id.lower():
-                return True
-            elif "in" in data_id.lower():
-                return False
-            
-            # Method 3: Position-based detection as fallback
-            try:
-                location = element.location
-                size = element.size
-                window_width = self.driver.get_window_size()['width']
-                
-                element_center_x = location['x'] + (size['width'] / 2)
-                center_percent = (element_center_x / window_width) * 100
-                
-                # If the message center is significantly to the right (> 60% of window width)
-                if center_percent > 60:
-                    return True
-                # If the message center is significantly to the left (< 40% of window width)  
-                elif center_percent < 40:
-                    return False
-                    
-            except Exception:
-                pass
-            
-            # Method 4: Check parent elements
-            parent = element
-            for level in range(3):
-                try:
-                    parent = parent.find_element(By.XPATH, './..')
-                    parent_class = parent.get_attribute("class") or ""
-                    
-                    for indicator in incoming_indicators:
-                        if indicator in parent_class:
-                            return False
-                    
-                    for indicator in outgoing_indicators:
-                        if indicator in parent_class:
-                            return True
-                except:
-                    break
-            
-            # Default to incoming (safer assumption)
-            return False
-            
-        except Exception:
-            return False
-    
-    def _is_timestamp_or_status(self, text: str) -> bool:
-        """Check if text looks like a timestamp or status message."""
-        if not text:
-            return True
-            
-        # Common patterns for timestamps and status
-        timestamp_patterns = [
-            r'^\d{1,2}:\d{2}',  # Time format
-            r'^Yesterday',
-            r'^Today',
-            r'^\w+day',  # Monday, Tuesday, etc.
-            r'^\d{1,2}/\d{1,2}',  # Date format
-            r'^Read$',
-            r'^Delivered$',
-            r'^Sent$',
-            r'checkmark',
-            r'✓',
-        ]
-        
-        import re
-        for pattern in timestamp_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-                
-        # Very short text is likely status
-        if len(text.strip()) < 3:
-            return True
-            
-        return False
-    
-    def _extract_timestamp(self, element) -> Optional[datetime]:
-        """Try to extract timestamp from message element."""
-        try:
-            # Look for timestamp indicators
-            timestamp_selectors = [
-                '[data-pre-plain-text]',  # WhatsApp sometimes stores timestamp here
-                '.copyable-text time',
-                'time',
-                'span[title*=":"]',  # Elements with time in title
-            ]
-            
-            for selector in timestamp_selectors:
-                try:
-                    time_elements = element.find_elements(By.CSS_SELECTOR, selector)
-                    for time_elem in time_elements:
-                        time_text = time_elem.get_attribute('title') or time_elem.text
-                        if time_text and ':' in time_text:
-                            # Try to parse common time formats
-                            import re
-                            time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
-                            if time_match:
-                                # For now, just use current date with extracted time
-                                # In a full implementation, you'd parse the full timestamp
-                                return datetime.now()  # Simplified
-                except:
-                    continue
-                    
-            return None
-            
-        except Exception:
-            return None
-    
-    async def start_message_monitoring(self):
-        """Start monitoring for new messages and auto-reply if enabled."""
+    async def start_monitoring(self):
+        """Start monitoring for auto-reply."""
         logger.info("Starting message monitoring...")
         
         while True:
             try:
-                chats = self.get_chat_list()
+                messages = self.get_recent_messages(5)
                 
-                for chat_name in chats:
-                    if self.select_chat(chat_name):
-                        await self.process_chat_messages(chat_name)
+                for message in messages:
+                    await self._process_message(message)
                 
-                await asyncio.sleep(5)  # Check every 5 seconds
+                await asyncio.sleep(5)
                 
+            except KeyboardInterrupt:
+                logger.info("Monitoring stopped")
+                break
             except Exception as e:
-                logger.error(f"Error in message monitoring: {e}")
+                logger.error(f"Monitoring error: {e}")
                 await asyncio.sleep(10)
     
-    async def process_chat_messages(self, chat_name: str):
-        """Process messages in a specific chat."""
-        messages = self.get_recent_messages(5)
+    async def _process_message(self, message: WhatsAppMessage):
+        """Process message for auto-reply."""
+        message_id = f"{message.chat_name}_{message.content}_{message.timestamp.isoformat()}"
         
-        for message in messages:
-            message_id = f"{chat_name}_{message.content}_{message.timestamp.isoformat()}"
+        if message_id not in self.processed_messages and not message.is_outgoing:
+            self.processed_messages.add(message_id)
             
-            if message_id not in self.processed_messages and not message.is_outgoing:
-                self.processed_messages.add(message_id)
-                
-                # Analyze message intent
-                intent_analysis = await self.llm_manager.analyze_message_intent(message.content)
-                
-                if intent_analysis.get("requires_response", True):
-                    # Generate response
-                    response = await self.llm_manager.generate_whatsapp_response(
-                        message.content,
-                        message.sender,
-                        self._get_conversation_history(chat_name)
-                    )
-                    
-                    # Wait before responding
-                    await asyncio.sleep(settings.response_delay_seconds)
-                    
-                    # Send response
-                    if self.send_message(response):
-                        logger.info(f"Auto-replied to {chat_name}: {response[:50]}...")
-    
-    def _get_conversation_history(self, chat_name: str) -> List[Dict[str, str]]:
-        """Get conversation history for a chat in LLM format."""
-        if chat_name not in self.message_history:
-            return []
-        
-        history = []
-        for message in self.message_history[chat_name][-10:]:  # Last 10 messages
-            role = "assistant" if message.is_outgoing else "user"
-            history.append({
-                "role": role,
-                "content": message.content
-            })
-        
-        return history
+            # Generate response
+            response = await self.llm_manager.generate_whatsapp_response(
+                message.content,
+                message.sender,
+                []  # Simplified - no conversation history
+            )
+            
+            await asyncio.sleep(settings.response_delay_seconds)
+            
+            if self.send_message(response):
+                logger.info(f"Auto-replied: {response[:50]}...")
     
     async def stop(self):
-        """Stop the automation and clean up."""
-        logger.info("Stopping WhatsApp automation...")
-        
+        """Stop automation and cleanup."""
+        logger.info("Stopping automation...")
         if self.driver:
             self.driver.quit()
             self.driver = None
-        
-        logger.info("WhatsApp automation stopped")
 
 
-# Convenience functions
-async def send_message_to_contact(contact_name: str, message: str) -> bool:
-    """Send a message to a specific contact."""
+# Simple convenience functions
+async def send_message_to_contact(contact_name: str, message: str, chat_type: str = "individual") -> bool:
+    """Send message to a contact or group.
+    
+    Args:
+        contact_name: Name/number of contact or group name
+        message: Message to send
+        chat_type: "individual" for direct messages, "group" for group chats
+    """
     automation = WhatsAppAutomation()
     
     try:
-        automation.driver = automation.setup_driver()
-        await automation.connect_to_whatsapp()
+        await automation.start()
         
-        if automation.select_chat(contact_name):
+        if automation.select_chat(contact_name, chat_type):
             result = automation.send_message(message)
             await automation.stop()
             return result
@@ -748,15 +470,20 @@ async def send_message_to_contact(contact_name: str, message: str) -> bool:
         return False
 
 
-async def get_chat_messages(contact_name: str, limit: int = 10) -> List[WhatsAppMessage]:
-    """Get recent messages from a specific chat."""
+async def get_chat_messages(contact_name: str, limit: int = 10, chat_type: str = "individual") -> List[WhatsAppMessage]:
+    """Get messages from a contact or group.
+    
+    Args:
+        contact_name: Name/number of contact or group name
+        limit: Number of messages to retrieve
+        chat_type: "individual" for direct messages, "group" for group chats
+    """
     automation = WhatsAppAutomation()
     
     try:
-        automation.driver = automation.setup_driver()
-        await automation.connect_to_whatsapp()
+        await automation.start()
         
-        if automation.select_chat(contact_name):
+        if automation.select_chat(contact_name, chat_type):
             messages = automation.get_recent_messages(limit)
             await automation.stop()
             return messages

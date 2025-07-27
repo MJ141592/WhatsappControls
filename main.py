@@ -77,16 +77,20 @@ def start(
 
 @app.command()
 def send(
-    contact: str = typer.Argument(..., help="Contact name to send message to"),
-    message: str = typer.Argument(..., help="Message to send")
+    contact: str = typer.Argument(..., help="Contact name/number or group name to send message to"),
+    message: str = typer.Argument(..., help="Message to send"),
+    group: bool = typer.Option(False, "--group", "-g", help="Target a group chat instead of individual contact")
 ):
-    """Send a message to a specific contact."""
+    """Send a message to a specific contact or group."""
     setup_logging()
     
-    console.print(f"📤 Sending message to {contact}...")
+    chat_type = "group" if group else "individual"
+    target_type = "group" if group else "contact"
+    
+    console.print(f"📤 Sending message to {target_type}: {contact}...")
     
     async def send_msg():
-        success = await send_message_to_contact(contact, message)
+        success = await send_message_to_contact(contact, message, chat_type)
         if success:
             console.print("✅ Message sent successfully!", style="bold green")
         else:
@@ -97,16 +101,20 @@ def send(
 
 @app.command()
 def get_messages(
-    contact: str = typer.Argument(..., help="Contact name to get messages from"),
-    limit: int = typer.Option(10, "--limit", "-l", help="Number of messages to retrieve")
+    contact: str = typer.Argument(..., help="Contact name/number or group name to get messages from"),
+    limit: int = typer.Option(10, "--limit", "-l", help="Number of messages to retrieve"),
+    group: bool = typer.Option(False, "--group", "-g", help="Target a group chat instead of individual contact")
 ):
-    """Get recent messages from a specific contact."""
+    """Get recent messages from a specific contact or group."""
     setup_logging()
     
-    console.print(f"📥 Getting messages from {contact}...")
+    chat_type = "group" if group else "individual"
+    target_type = "group" if group else "contact"
+    
+    console.print(f"📥 Getting messages from {target_type}: {contact}...")
     
     async def get_msgs():
-        messages = await get_chat_messages(contact, limit)
+        messages = await get_chat_messages(contact, limit, chat_type)
         
         if messages:
             table = Table(title=f"Recent Messages from {contact}")
