@@ -356,58 +356,239 @@ class WhatsAppAutomation:
     def get_recent_messages(self, limit: int = 10) -> List[WhatsAppMessage]:
         """Get recent messages from the current chat."""
         try:
-            # Look for message containers - try multiple selectors
+            # Wait a bit for messages to load
+            time.sleep(2)
+            
+            # Modern WhatsApp Web message selectors
             message_selectors = [
-                'div[data-id]',  # Common message container
+                'div[data-id*="BAE5"]',  # WhatsApp message containers often have this pattern
+                'div[role="row"]',  # Message rows in chat
+                'div[class*="_akbu"]',  # Common WhatsApp message class pattern
                 'div[class*="message"]',  # Any element with "message" in class
                 '.copyable-text',  # Traditional selector that might still work
+                'div[data-id]',  # Fallback to any data-id elements
             ]
             
             message_elements = []
+            working_selector = None
+            
             for selector in message_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
+                    if len(elements) > 0:
                         message_elements = elements
+                        working_selector = selector
+                        logger.info(f"Found {len(elements)} messages using selector: {selector}")
                         break
-                except:
-                    continue
-            
-            messages = []
-            for element in message_elements[-limit:]:
-                try:
-                    # Try to determine if message is outgoing
-                    is_outgoing = False
-                    try:
-                        # Check various indicators for outgoing messages
-                        class_attr = element.get_attribute("class") or ""
-                        if "message-out" in class_attr or "msg-out" in class_attr:
-                            is_outgoing = True
-                    except:
-                        pass
-                    
-                    # Get message content
-                    content = element.text.strip()
-                    if content:
-                        # Create message object
-                        message = WhatsAppMessage(
-                            sender="You" if is_outgoing else "Contact",
-                            content=content,
-                            timestamp=datetime.now(),
-                            is_outgoing=is_outgoing,
-                            chat_name="Current Chat"
-                        )
-                        
-                        messages.append(message)
-                        
                 except Exception:
                     continue
             
+            if not message_elements:
+                logger.warning("No message elements found with any selector")
+                return []
+            
+            messages = []
+            chat_title = self._get_current_chat_name()
+            
+            # Process the most recent messages
+            recent_elements = message_elements[-limit:] if len(message_elements) > limit else message_elements
+            
+            for i, element in enumerate(recent_elements):
+                try:
+                    # Get message content - try multiple methods
+                    content = ""
+                    
+                    # Method 1: Direct text
+                    content = element.text.strip()
+                    
+                    # Method 2: Look for specific message text containers
+                    if not content:
+                        text_containers = element.find_elements(
+                            By.CSS_SELECTOR, 
+                            '.copyable-text, [data-pre-plain-text], span[dir="ltr"], span[dir="auto"]'
+                        )
+                        for container in text_containers:
+                            text = container.text.strip()
+                            if text and len(text) > len(content):
+                                content = text
+                    
+                    # Skip if no content found
+                    if not content or len(content.strip()) == 0:
+                        continue
+                    
+                    # Clean up content (remove timestamps, extra whitespace)
+                    content_lines = content.split('\n')
+                    # The actual message is usually the longest line or the last substantial line
+                    actual_message = ""
+                    for line in content_lines:
+                        line = line.strip()
+                        if line and not self._is_timestamp_or_status(line):
+                            if len(line) > len(actual_message):
+                                actual_message = line
+                    
+                    if not actual_message:
+                        actual_message = content.split('\n')[0].strip()  # Fallback to first line
+                    
+                    # Determine if message is outgoing
+                    is_outgoing = self._is_outgoing_message(element)
+                    
+                    # Get timestamp (approximate)
+                    timestamp = self._extract_timestamp(element) or datetime.now()
+                    
+                    # Create message object
+                    message = WhatsAppMessage(
+                        sender="You" if is_outgoing else chat_title or "Contact",
+                        content=actual_message,
+                        timestamp=timestamp,
+                        is_outgoing=is_outgoing,
+                        chat_name=chat_title or "Current Chat"
+                    )
+                    
+                    messages.append(message)
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing message element {i}: {e}")
+                    continue
+            
+            logger.info(f"Successfully parsed {len(messages)} messages from {len(recent_elements)} elements")
             return messages
             
         except Exception as e:
             logger.error(f"Failed to get recent messages: {e}")
             return []
+    
+    def _get_current_chat_name(self) -> str:
+        """Get the name of the currently open chat."""
+        try:
+            # Try multiple selectors for chat title
+            title_selectors = [
+                'header span[title]',  # Chat title in header
+                'header [data-testid="conversation-info-header-chat-title"]',
+                'header h1',
+                '[data-testid="conversation-header"] span',
+            ]
+            
+            for selector in title_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        title = element.get_attribute('title') or element.text.strip()
+                        if title and len(title) > 0:
+                            return title
+                except:
+                    continue
+                    
+            return "Unknown Chat"
+            
+        except Exception:
+            return "Unknown Chat"
+    
+    def _is_outgoing_message(self, element) -> bool:
+        """Determine if a message element is an outgoing message."""
+        try:
+            # Check various indicators for outgoing messages
+            class_attr = element.get_attribute("class") or ""
+            
+            # Common patterns for outgoing messages
+            outgoing_indicators = [
+                "message-out", "msg-out", "_amk4", "_akbu", 
+                "outgoing", "sent", "_ahjy"  # Various WhatsApp class patterns
+            ]
+            
+            for indicator in outgoing_indicators:
+                if indicator in class_attr:
+                    return True
+            
+            # Check parent elements
+            parent = element
+            for _ in range(3):  # Check up to 3 levels up
+                try:
+                    parent = parent.find_element(By.XPATH, './..')
+                    parent_class = parent.get_attribute("class") or ""
+                    for indicator in outgoing_indicators:
+                        if indicator in parent_class:
+                            return True
+                except:
+                    break
+            
+            # Check if message is positioned on the right (outgoing messages are typically on the right)
+            try:
+                location = element.location
+                size = element.size
+                window_width = self.driver.get_window_size()['width']
+                
+                # If message is in the right half of the screen, likely outgoing
+                if location['x'] + size['width'] > window_width * 0.6:
+                    return True
+            except:
+                pass
+                
+            return False
+            
+        except Exception:
+            return False
+    
+    def _is_timestamp_or_status(self, text: str) -> bool:
+        """Check if text looks like a timestamp or status message."""
+        if not text:
+            return True
+            
+        # Common patterns for timestamps and status
+        timestamp_patterns = [
+            r'^\d{1,2}:\d{2}',  # Time format
+            r'^Yesterday',
+            r'^Today',
+            r'^\w+day',  # Monday, Tuesday, etc.
+            r'^\d{1,2}/\d{1,2}',  # Date format
+            r'^Read$',
+            r'^Delivered$',
+            r'^Sent$',
+            r'checkmark',
+            r'✓',
+        ]
+        
+        import re
+        for pattern in timestamp_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return True
+                
+        # Very short text is likely status
+        if len(text.strip()) < 3:
+            return True
+            
+        return False
+    
+    def _extract_timestamp(self, element) -> Optional[datetime]:
+        """Try to extract timestamp from message element."""
+        try:
+            # Look for timestamp indicators
+            timestamp_selectors = [
+                '[data-pre-plain-text]',  # WhatsApp sometimes stores timestamp here
+                '.copyable-text time',
+                'time',
+                'span[title*=":"]',  # Elements with time in title
+            ]
+            
+            for selector in timestamp_selectors:
+                try:
+                    time_elements = element.find_elements(By.CSS_SELECTOR, selector)
+                    for time_elem in time_elements:
+                        time_text = time_elem.get_attribute('title') or time_elem.text
+                        if time_text and ':' in time_text:
+                            # Try to parse common time formats
+                            import re
+                            time_match = re.search(r'(\d{1,2}:\d{2})', time_text)
+                            if time_match:
+                                # For now, just use current date with extracted time
+                                # In a full implementation, you'd parse the full timestamp
+                                return datetime.now()  # Simplified
+                except:
+                    continue
+                    
+            return None
+            
+        except Exception:
+            return None
     
     async def start_message_monitoring(self):
         """Start monitoring for new messages and auto-reply if enabled."""
