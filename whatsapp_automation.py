@@ -359,14 +359,19 @@ class WhatsAppAutomation:
             # Wait a bit for messages to load
             time.sleep(2)
             
-            # Modern WhatsApp Web message selectors
+            # Target the actual message bubbles, not container elements
             message_selectors = [
-                'div[data-id*="BAE5"]',  # WhatsApp message containers often have this pattern
-                'div[role="row"]',  # Message rows in chat
-                'div[class*="_akbu"]',  # Common WhatsApp message class pattern
-                'div[class*="message"]',  # Any element with "message" in class
-                '.copyable-text',  # Traditional selector that might still work
-                'div[data-id]',  # Fallback to any data-id elements
+                # Target the actual message bubble elements
+                'div[class*="message-"]',  # Message bubble classes
+                'div[class*="_akbu"]:has(span)',  # Message bubbles with text content
+                'div[data-id][class*="copyable-text"]',  # Copyable text containers
+                '.copyable-text',  # Traditional message text containers
+                'div[class*="tail-"]',  # Message tail indicators (left/right alignment)
+                # More specific bubble selectors
+                'div[class*="_akbu"] > div[class*="_akbv"]',  # Nested message content
+                'span[class*="copyable-text"]',  # Text span elements
+                # Fallback - but filter for actual message content
+                'div[data-id*="BAE5"]',  # WhatsApp message containers
             ]
             
             message_elements = []
@@ -375,13 +380,60 @@ class WhatsAppAutomation:
             for selector in message_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if len(elements) > 0:
-                        message_elements = elements
+                    # Filter elements to ensure they contain actual message content
+                    valid_elements = []
+                    for elem in elements:
+                        text = elem.text.strip()
+                        if text and len(text) > 0 and not self._is_timestamp_or_status(text):
+                            # Additional check: make sure element has reasonable dimensions
+                            try:
+                                size = elem.size
+                                location = elem.location
+                                if size['width'] > 50 and size['height'] > 10:  # Reasonable message size
+                                    valid_elements.append(elem)
+                            except:
+                                continue
+                    
+                    if len(valid_elements) > 0:
+                        message_elements = valid_elements
                         working_selector = selector
-                        logger.info(f"Found {len(elements)} messages using selector: {selector}")
+                        logger.info(f"Found {len(valid_elements)} valid messages using selector: {selector}")
                         break
                 except Exception:
                     continue
+            
+            # If we still don't have good elements, try a different approach
+            if not message_elements:
+                logger.info("Trying alternative approach: looking for message containers with position differences")
+                try:
+                    # Get all potential message elements
+                    all_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[data-id], div[class*="message"], span[class*="copyable"]')
+                    
+                    # Group by position to find actual message bubbles
+                    position_groups = {}
+                    for elem in all_elements:
+                        try:
+                            text = elem.text.strip()
+                            if text and len(text) > 0:
+                                location = elem.location
+                                size = elem.size
+                                pos_key = f"{location['x']}-{size['width']}"
+                                
+                                if pos_key not in position_groups:
+                                    position_groups[pos_key] = []
+                                position_groups[pos_key].append(elem)
+                        except:
+                            continue
+                    
+                    # Look for groups with different positions (indicating left vs right alignment)
+                    for pos_key, elements in position_groups.items():
+                        if len(elements) > 1:  # Multiple messages with same position pattern
+                            message_elements.extend(elements[:limit])  # Limit to avoid too many
+                            logger.info(f"Found {len(elements)} messages with position pattern: {pos_key}")
+                            break
+                    
+                except Exception as e:
+                    logger.warning(f"Alternative approach failed: {e}")
             
             if not message_elements:
                 logger.warning("No message elements found with any selector")
@@ -395,30 +447,15 @@ class WhatsAppAutomation:
             
             for i, element in enumerate(recent_elements):
                 try:
-                    # Get message content - try multiple methods
-                    content = ""
-                    
-                    # Method 1: Direct text
+                    # Get message content
                     content = element.text.strip()
                     
-                    # Method 2: Look for specific message text containers
-                    if not content:
-                        text_containers = element.find_elements(
-                            By.CSS_SELECTOR, 
-                            '.copyable-text, [data-pre-plain-text], span[dir="ltr"], span[dir="auto"]'
-                        )
-                        for container in text_containers:
-                            text = container.text.strip()
-                            if text and len(text) > len(content):
-                                content = text
-                    
-                    # Skip if no content found
-                    if not content or len(content.strip()) == 0:
+                    # Skip if no content found or it's a status message
+                    if not content or len(content.strip()) == 0 or self._is_timestamp_or_status(content):
                         continue
                     
                     # Clean up content (remove timestamps, extra whitespace)
                     content_lines = content.split('\n')
-                    # The actual message is usually the longest line or the last substantial line
                     actual_message = ""
                     for line in content_lines:
                         line = line.strip()
@@ -428,6 +465,10 @@ class WhatsAppAutomation:
                     
                     if not actual_message:
                         actual_message = content.split('\n')[0].strip()  # Fallback to first line
+                    
+                    # Skip if message is too short or looks like metadata
+                    if len(actual_message) < 2:
+                        continue
                     
                     # Determine if message is outgoing
                     is_outgoing = self._is_outgoing_message(element)
@@ -486,43 +527,65 @@ class WhatsAppAutomation:
     def _is_outgoing_message(self, element) -> bool:
         """Determine if a message element is an outgoing message."""
         try:
-            # Check various indicators for outgoing messages
+            # Method 1: Check class attributes for explicit indicators
             class_attr = element.get_attribute("class") or ""
             
-            # Common patterns for outgoing messages
-            outgoing_indicators = [
-                "message-out", "msg-out", "_amk4", "_akbu", 
-                "outgoing", "sent", "_ahjy"  # Various WhatsApp class patterns
-            ]
+            # Check for explicit incoming indicators first
+            incoming_indicators = ["message-in", "msg-in", "incoming", "received", "tail-in"]
+            for indicator in incoming_indicators:
+                if indicator in class_attr:
+                    return False
             
+            # Check for explicit outgoing indicators
+            outgoing_indicators = ["message-out", "msg-out", "outgoing", "sent", "tail-out"]
             for indicator in outgoing_indicators:
                 if indicator in class_attr:
                     return True
             
-            # Check parent elements
+            # Method 2: Check data-id attributes
+            data_id = element.get_attribute("data-id") or ""
+            if "out" in data_id.lower():
+                return True
+            elif "in" in data_id.lower():
+                return False
+            
+            # Method 3: Position-based detection as fallback
+            try:
+                location = element.location
+                size = element.size
+                window_width = self.driver.get_window_size()['width']
+                
+                element_center_x = location['x'] + (size['width'] / 2)
+                center_percent = (element_center_x / window_width) * 100
+                
+                # If the message center is significantly to the right (> 60% of window width)
+                if center_percent > 60:
+                    return True
+                # If the message center is significantly to the left (< 40% of window width)  
+                elif center_percent < 40:
+                    return False
+                    
+            except Exception:
+                pass
+            
+            # Method 4: Check parent elements
             parent = element
-            for _ in range(3):  # Check up to 3 levels up
+            for level in range(3):
                 try:
                     parent = parent.find_element(By.XPATH, './..')
                     parent_class = parent.get_attribute("class") or ""
+                    
+                    for indicator in incoming_indicators:
+                        if indicator in parent_class:
+                            return False
+                    
                     for indicator in outgoing_indicators:
                         if indicator in parent_class:
                             return True
                 except:
                     break
             
-            # Check if message is positioned on the right (outgoing messages are typically on the right)
-            try:
-                location = element.location
-                size = element.size
-                window_width = self.driver.get_window_size()['width']
-                
-                # If message is in the right half of the screen, likely outgoing
-                if location['x'] + size['width'] > window_width * 0.6:
-                    return True
-            except:
-                pass
-                
+            # Default to incoming (safer assumption)
             return False
             
         except Exception:
