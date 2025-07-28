@@ -166,8 +166,8 @@ class WhatsAppAutomation:
                 return True
             else:
                 logger.error("Clicked on search result, but chat did not open.")
-                return False
-
+            return False
+            
         except Exception as e:
             logger.error(f"Failed to select {chat_type} chat for '{contact_name}': {e}")
             return False
@@ -242,74 +242,47 @@ class WhatsAppAutomation:
                     return True
             except:
                 continue
-        return False
+            return False
     
     def send_message(self, message: str) -> bool:
-        """Send a message to current chat."""
+        """Send a message to current chat using the compose box and Enter key."""
         try:
-            # Wait a moment for chat to fully load
-            time.sleep(2)
-            
-            # Try multiple selectors for message input
+            time.sleep(1)  # small pause for chat to stabilise
+
             input_selectors = [
-                'div[contenteditable="true"][data-tab="10"]',  # Original
-                'div[contenteditable="true"][aria-label*="Type a message"]',  # By aria-label
-                'div[contenteditable="true"][aria-label*="type a message"]',  # Case variation
-                'div[contenteditable="true"][role="textbox"]',  # By role
-                'div[data-testid="conversation-compose-box-input"]',  # Possible new selector
-                'div[contenteditable="true"][data-tab]',  # Any data-tab
-                'div[contenteditable="true"]',  # Generic fallback
-                '[data-testid="compose-btn"]',  # Compose button area
-                'div[aria-label*="Message"]',  # Any element with Message in aria-label
-                'div[placeholder*="Type"]',  # Placeholder text
-                'div[class*="compose"]',  # Class-based
-                'div[class*="input"]',  # Input class
-                'textarea',  # Textarea elements
-                'input[type="text"]'  # Text inputs
+                'div[contenteditable="true"][data-tab="10"]',
+                'div[contenteditable="true"][aria-label*="Type a message"]',
+                'div[contenteditable="true"][role="textbox"]',
+                'div[data-testid="conversation-compose-box-input"]',
+                'div[contenteditable="true"]',
             ]
-            
+
             message_box = None
-            
             for selector in input_selectors:
                 try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for elem in elements:
-                        # Make sure it's the message input (bottom half of page, visible)
-                        if elem.location['y'] > 200 and elem.is_displayed() and elem.is_enabled():
-                            message_box = elem
+                    elems = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for e in elems:
+                        if e.is_displayed() and e.is_enabled() and e.location["y"] > 200:
+                            message_box = e
                             logger.info(f"Found message input using {selector}")
                             break
                     if message_box:
                         break
                 except Exception:
                     continue
-            
+
             if not message_box:
-                logger.error("Could not find message input box")
-                # Debug: print page source if input not found
-                try:
-                    page_source = self.driver.page_source
-                    with open("logs/page_source.html", "w") as f:
-                        f.write(page_source)
-                    logger.debug("Saved page source to logs/page_source.html for debugging")
-                except Exception as e:
-                    logger.error(f"Failed to save page source: {e}")
+                logger.error("Could not locate message input box")
                 return False
-            
+
+            # Focus and send the text followed by Enter
             message_box.click()
-            time.sleep(0.3)
             message_box.clear()
             message_box.send_keys(message)
-            time.sleep(0.5)
             message_box.send_keys(Keys.RETURN)
             time.sleep(1)
-            
-            # Keep connection open for 2 extra seconds to ensure message sends
-            time.sleep(2)
-            
-            logger.info(f"Message sent: {message[:50]}...")
+            logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}…")
             return True
-            
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
             return False
@@ -461,10 +434,10 @@ class WhatsAppAutomation:
     async def _process_message(self, message: WhatsAppMessage):
         """Process message for auto-reply."""
         message_id = f"{message.chat_name}_{message.content}_{message.timestamp.isoformat()}"
-        
+            
         if message_id not in self.processed_messages and not message.is_outgoing:
             self.processed_messages.add(message_id)
-            
+                
             # Generate response
             response = await self.llm_manager.generate_whatsapp_response(
                 message.content,
@@ -483,7 +456,7 @@ class WhatsAppAutomation:
         if self.driver:
             self.driver.quit()
             self.driver = None
-
+        
 
 # Simple convenience functions
 async def send_message_to_contact(contact_name: str, message: str, chat_type: str = "individual") -> bool:
@@ -662,5 +635,116 @@ async def live_reply(
 
     except KeyboardInterrupt:
         logger.info("Live-reply stopped by user")
+    finally:
+        await automation.stop() 
+
+
+# ------------------------------------------------------------
+# Auto sign-up live responder (string processing only)
+# ------------------------------------------------------------
+
+
+import re
+
+
+def _parse_signup_list(text: str):
+    """Return (total_bullets, names_list) if text looks like a numbered list else None."""
+    raw_lines = [l.strip() for l in text.splitlines()]
+    # find first bullet line
+    start = 0
+    pattern = re.compile(r"^\d+\)\s*")
+    while start < len(raw_lines) and not pattern.match(raw_lines[start]):
+        start += 1
+    lines = [l for l in raw_lines[start:] if l]
+    pattern = re.compile(r"^(\d+)\)\s*(.*)$")
+    bullets = []
+    nums = []
+    for ln in lines:
+        m = pattern.match(ln)
+        if not m:
+            return None
+        nums.append(int(m.group(1)))
+        bullets.append(m.group(2).strip())  # may be empty
+    # verify numbering sequential starting at 1
+    if nums != list(range(1, len(nums) + 1)):
+        return None
+    return len(bullets), bullets
+
+
+async def auto_signup_live(
+    chat_name: str,
+    poll_interval: int = 5,
+    my_name: str = "Matthew",
+):
+    """Continuously watch group sign-up list and add *my_name* when criteria met."""
+
+    automation = WhatsAppAutomation()
+    processed: set[str] = set()
+
+    from datetime import datetime
+
+    try:
+        await automation.start()
+        if not automation.select_chat(chat_name, chat_type="group"):
+            logger.error("Cannot open group chat %s", chat_name)
+            return
+
+        # Mark all current messages as processed so we only handle NEW messages
+        for m in automation.get_recent_messages(50):
+            processed.add(m.content)
+
+        start_time = datetime.now()
+
+        while True:
+            msgs = automation.get_recent_messages(5)
+            # look at newest incoming message after script started
+            incoming = [m for m in msgs if not m.is_outgoing and m.timestamp > start_time]
+            if not incoming:
+                await asyncio.sleep(poll_interval)
+                continue
+            latest = incoming[-1]
+            key = latest.content
+            if key in processed:
+                await asyncio.sleep(poll_interval)
+                continue
+            parsed = _parse_signup_list(latest.content)
+            if not parsed:
+                processed.add(key)  # not a list – mark so we don't re-parse
+                await asyncio.sleep(poll_interval)
+                continue
+            total_bullets, names = parsed
+            filled = [n for n in names if n]
+            # require at least 3 names already and ensure we're not already on it
+            if len(filled) < 3 or my_name in names:
+                processed.add(key)
+                await asyncio.sleep(poll_interval)
+                continue
+            # insert ourselves at first empty slot (or append)
+            for idx, name in enumerate(names):
+                if not name:
+                    names[idx] = my_name
+                    break
+            else:
+                names.append(my_name)
+                total_bullets += 1
+
+            # Preserve original header (lines before first bullet)
+            raw_lines = latest.content.splitlines()
+            bullet_start = 0
+            bullet_pat = re.compile(r"^\d+\)")
+            while bullet_start < len(raw_lines) and not bullet_pat.match(raw_lines[bullet_start].strip()):
+                bullet_start += 1
+            header_lines = raw_lines[:bullet_start]
+
+            lines = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
+            reply_text = "\n".join(header_lines + lines)
+            if automation.send_message(reply_text):
+                logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
+                processed.add(key)
+                break  # message sent – exit loop
+            await asyncio.sleep(poll_interval)
+
+    except KeyboardInterrupt:
+        logger.info("Auto-signup stopped")
     finally:
         await automation.stop() 
