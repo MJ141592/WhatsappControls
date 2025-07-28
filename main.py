@@ -8,35 +8,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from loguru import logger
 
 from config import settings
+from utils import setup_logging
 from whatsapp_automation import WhatsAppAutomation, send_message_to_contact, get_chat_messages
 from llm_client import LLMManager
 
 app = typer.Typer(help="WhatsApp Automation Tool with LLM Integration")
 console = Console()
-
-
-def setup_logging():
-    """Set up logging configuration."""
-    # Create logs directory if it doesn't exist
-    os.makedirs("logs", exist_ok=True)
-    
-    # Configure loguru
-    logger.remove()  # Remove default handler
-    logger.add(
-        settings.log_file,
-        level=settings.log_level,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} | {message}",
-        rotation="1 MB",
-        retention="7 days"
-    )
-    logger.add(
-        lambda msg: console.print(msg, style="dim"),
-        level=settings.log_level,
-        format="{time:HH:mm:ss} | {level} | {message}"
-    )
 
 
 @app.command()
