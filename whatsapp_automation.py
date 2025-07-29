@@ -278,7 +278,13 @@ class WhatsAppAutomation:
             # Focus and send the text followed by Enter
             message_box.click()
             message_box.clear()
-            message_box.send_keys(message)
+            lines = message.split("\n")
+            for idx, part in enumerate(lines):
+                if part:
+                    message_box.send_keys(part)
+                if idx < len(lines) - 1:
+                    # Shift+Enter for new line without sending
+                    message_box.send_keys(Keys.SHIFT, Keys.ENTER)
             message_box.send_keys(Keys.RETURN)
             time.sleep(1)
             logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}…")
