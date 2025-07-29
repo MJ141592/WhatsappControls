@@ -127,47 +127,13 @@ class WhatsAppAutomation:
             search_box.send_keys(Keys.RETURN)
             time.sleep(2)
 
-            # If chat still not open, try Arrow-Down + ENTER
-            if not self._verify_chat_opened():
-                search_box.send_keys(Keys.ARROW_DOWN, Keys.RETURN)
-                time.sleep(2)
-
             # Verify again
             if self._verify_chat_opened():
                 logger.info(f"Successfully opened {chat_type} chat via keyboard: {contact_name}")
                 return True
-
-            # 2. Find the correct search result
-            results = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="listitem"]')
-            target_element = None
-            for result in results:
-                result_text = result.text.lower()
-                if contact_name.lower() in result_text:
-                    group_indicators = ['group', 'participants', 'members', 'in common']
-                    is_group = any(indicator in result_text for indicator in group_indicators)
-                    
-                    if chat_type == "individual" and not is_group:
-                        target_element = result
-                        break
-                    elif chat_type == "group" and is_group:
-                        target_element = result
-                        break
             
-            if not target_element:
-                logger.error(f"Could not find a matching {chat_type} in search results.")
-                return False
-
-            # 3. Click the result reliably and verify
-            logger.info(f"Found '{target_element.text.splitlines()[0]}'. Attempting to open chat...")
-            self.driver.execute_script("arguments[0].click();", target_element)
-            
-            if self._verify_chat_opened():
-                logger.info(f"Successfully opened {chat_type} chat.")
-                return True
-            else:
-                logger.error("Clicked on search result, but chat did not open.")
             return False
-            
+
         except Exception as e:
             logger.error(f"Failed to select {chat_type} chat for '{contact_name}': {e}")
             return False
