@@ -59,11 +59,6 @@ class WhatsAppAutomation:
         try:
             self.driver = self.setup_driver()
             await self.connect_to_whatsapp()
-            
-            if settings.auto_reply_enabled:
-                await self.start_monitoring()
-            else:
-                logger.info("Auto-reply disabled. Use manual methods to send messages.")
                 
         except Exception as e:
             logger.error(f"Failed to start: {e}")
@@ -153,62 +148,6 @@ class WhatsAppAutomation:
             logger.debug("Verification failed: Could not find message compose box.")
             return False
         return False
-    
-    def _check_message_compose(self) -> bool:
-        """Check for message compose elements."""
-        compose_selectors = [
-            'div[contenteditable="true"][data-tab="10"]',
-            'div[contenteditable="true"][aria-label*="Type a message"]',
-            'div[contenteditable="true"][aria-label*="type a message"]',
-            'div[data-testid="conversation-compose-box-input"]',
-            'div[contenteditable="true"]'
-        ]
-        
-        for selector in compose_selectors:
-            try:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                for elem in elements:
-                    if elem.is_displayed() and elem.location['y'] > 300:
-                        return True
-            except:
-                continue
-        return False
-    
-    def _check_chat_header(self) -> bool:
-        """Check for chat header elements."""
-        header_selectors = [
-            'header[data-testid="conversation-header"]',
-            'header span[title]',
-            'div[data-testid="conversation-info-header"]',
-            'header'
-        ]
-        
-        for selector in header_selectors:
-            try:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                for elem in elements:
-                    if elem.is_displayed() and elem.location['y'] < 200:
-                        return True
-            except:
-                continue
-        return False
-    
-    def _check_message_area(self) -> bool:
-        """Check for message display area."""
-        message_selectors = [
-            '[data-testid="conversation-panel-body"]',
-            'div[class*="message"]',
-            '[data-testid="msg-container"]'
-        ]
-        
-        for selector in message_selectors:
-            try:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    return True
-            except:
-                continue
-            return False
     
     def send_message(self, message: str) -> bool:
         """Send a message to current chat using the compose box and Enter key."""
@@ -382,45 +321,6 @@ class WhatsAppAutomation:
             return title_elem.get_attribute('title') or title_elem.text
         except:
             return "Unknown Chat"
-    
-    async def start_monitoring(self):
-        """Start monitoring for auto-reply."""
-        logger.info("Starting message monitoring...")
-        
-        while True:
-            try:
-                messages = self.get_recent_messages(5)
-                
-                for message in messages:
-                    await self._process_message(message)
-                
-                await asyncio.sleep(5)
-                
-            except KeyboardInterrupt:
-                logger.info("Monitoring stopped")
-                break
-            except Exception as e:
-                logger.error(f"Monitoring error: {e}")
-                await asyncio.sleep(10)
-    
-    async def _process_message(self, message: WhatsAppMessage):
-        """Process message for auto-reply."""
-        message_id = f"{message.chat_name}_{message.content}_{message.timestamp.isoformat()}"
-            
-        if message_id not in self.processed_messages and not message.is_outgoing:
-            self.processed_messages.add(message_id)
-                
-            # Generate response
-            response = await self.llm_manager.generate_whatsapp_response(
-                message.content,
-                message.sender,
-                []  # Simplified - no conversation history
-            )
-            
-            await asyncio.sleep(settings.response_delay_seconds)
-            
-            if self.send_message(response):
-                logger.info(f"Auto-replied: {response[:50]}...")
     
     async def stop(self):
         """Stop automation and cleanup."""
