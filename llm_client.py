@@ -150,32 +150,3 @@ class LLMManager:
         })
         
         return await self.client.generate_response(messages, system_prompt)
-    
-    async def analyze_message_intent(self, message: str) -> Dict[str, Any]:
-        """Analyze the intent and sentiment of a message."""
-        
-        system_prompt = """Analyze the following WhatsApp message and return a JSON response with:
-        - intent: the main purpose (question, request, greeting, complaint, etc.)
-        - sentiment: positive, negative, or neutral
-        - priority: low, medium, or high
-        - requires_response: true/false
-        - key_topics: list of main topics mentioned
-        
-        Only return valid JSON."""
-        
-        messages = [{"role": "user", "content": message}]
-        
-        response = await self.client.generate_response(messages, system_prompt)
-        
-        try:
-            import json
-            return json.loads(response)
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse intent analysis response: {response}")
-            return {
-                "intent": "unknown",
-                "sentiment": "neutral", 
-                "priority": "medium",
-                "requires_response": True,
-                "key_topics": []
-            } 
