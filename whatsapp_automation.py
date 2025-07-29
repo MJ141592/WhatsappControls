@@ -562,15 +562,15 @@ async def auto_signup_live(
             return
 
         # Mark all current messages as processed so we only handle NEW messages
-        for m in automation.get_recent_messages(50):
-            processed.add(m.content)
+        # for m in automation.get_recent_messages(50):
+        #     processed.add(m.content)
 
         start_time = datetime.now()
 
         while True:
             msgs = automation.get_recent_messages(5)
             # look at newest incoming message after script started
-            incoming = [m for m in msgs if not m.is_outgoing and m.timestamp > start_time]
+            incoming = [m for m in msgs if not m.is_outgoing]# and m.timestamp > start_time]
             if not incoming:
                 await asyncio.sleep(poll_interval)
                 continue
