@@ -592,28 +592,27 @@ async def auto_signup_live(
                 await asyncio.sleep(poll_interval)
                 continue
             # insert ourselves at first empty slot (or append)
+            added_name = False
             for idx, name in enumerate(names):
                 if not name:
                     names[idx] = my_name
+                    added_name = True
                     break
-            else:
-                names.append(my_name)
-                total_bullets += 1
+            if added_name:
+                # Preserve original header (lines before first bullet)
+                raw_lines = latest.content.splitlines()
+                bullet_start = 0
+                bullet_pat = re.compile(r"^\d+\)")
+                while bullet_start < len(raw_lines) and not bullet_pat.match(raw_lines[bullet_start].strip()):
+                    bullet_start += 1
+                header_lines = raw_lines[:bullet_start]
 
-            # Preserve original header (lines before first bullet)
-            raw_lines = latest.content.splitlines()
-            bullet_start = 0
-            bullet_pat = re.compile(r"^\d+\)")
-            while bullet_start < len(raw_lines) and not bullet_pat.match(raw_lines[bullet_start].strip()):
-                bullet_start += 1
-            header_lines = raw_lines[:bullet_start]
-
-            lines = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
-            reply_text = "\n".join(header_lines + lines)
-            if automation.send_message(reply_text):
-                logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
-                processed.add(key)
-                break  # message sent – exit loop
+                lines = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
+                reply_text = "\n".join(header_lines + lines)
+                if automation.send_message(reply_text):
+                    logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
+                    processed.add(key)
+                    break  # message sent – exit loop
             await asyncio.sleep(poll_interval)
 
     except KeyboardInterrupt:
