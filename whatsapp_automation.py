@@ -15,6 +15,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, ElementNotInteractableException, NoSuchElementException
 from loguru import logger
+import html
 
 from config import settings
 from llm_client import LLMManager
@@ -183,6 +184,29 @@ class WhatsAppAutomation:
             # Focus and send the text followed by Enter
             message_box.click()
             message_box.clear()
+
+            # ChromeDriver's send_keys chokes on supplementary-plane characters (e.g. many emojis).
+            # If we detect any, set the compose box's HTML directly and hit Enter.
+            if any(ord(ch) > 0xFFFF for ch in message):
+                html_msg = html.escape(message).replace("\n", "<br>")
+                # Inject HTML and dispatch an input event so React sees the change
+                self.driver.execute_script(
+                    "arguments[0].innerHTML = arguments[1];"
+                    "var evt = new InputEvent('input', {bubbles: true});"
+                    "arguments[0].dispatchEvent(evt);",
+                    message_box,
+                    html_msg,
+                )
+                # Click the send button explicitly
+                try:
+                    send_btn = self.driver.find_element(By.CSS_SELECTOR, 'span[data-testid="send"]')
+                    self.driver.execute_script("arguments[0].click();", send_btn)
+                except Exception:
+                    # fallback: hit Enter
+                    message_box.send_keys(Keys.RETURN)
+                time.sleep(1)
+                logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}… (JS inject)")
+                return True
             lines = message.split("\n")
             for idx, part in enumerate(lines):
                 if part:
@@ -241,7 +265,13 @@ class WhatsAppAutomation:
                     for text_sel in text_selectors:
                         try:
                             content_elem = elem.find_element(By.CSS_SELECTOR, text_sel)
-                            content = content_elem.text.strip()
+                            raw_html = content_elem.get_attribute("innerHTML") or ""
+                            # Replace emoji <img ... alt="😀"> with the alt value and strip other tags
+                            decoded = re.sub(r"<img[^>]+alt=['\"]([^'\"]+)['\"][^>]*>", r"\1", raw_html)
+                            decoded = re.sub(r"<[^>]+>", "", decoded).strip()
+                            # print(raw_html)
+                            print(decoded)
+                            content = decoded or content_elem.text.strip()
                             if content:
                                 break
                         except:
@@ -249,9 +279,12 @@ class WhatsAppAutomation:
                     
                     # If no content found, try getting text directly
                     if not content:
-                        content = elem.text.strip()
+                        raw_html = elem.get_attribute("innerHTML") or ""
+                        decoded = re.sub(r"<img[^>]+alt=['\"]([^'\"]+)['\"][^>]*>", r"\1", raw_html)
+                        decoded = re.sub(r"<[^>]+>", "", decoded).strip()
+                        content = decoded or elem.text.strip()
                     
-                    if not content or len(content) < 2:
+                    if not content:
                         continue
                     
                     # Determine if outgoing - try multiple ways
