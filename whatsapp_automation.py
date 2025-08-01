@@ -620,7 +620,7 @@ async def auto_signup_live(
             total_bullets, names = parsed
             filled = [n for n in names if n]
             # require at least 3 names already and ensure we're not already on it
-            if len(filled) < 3 or my_name in names:
+            if my_name in names: # len(filled) < 3 or, could sign up after first
                 processed.add(key)
                 await asyncio.sleep(poll_interval)
                 continue

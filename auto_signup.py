@@ -8,7 +8,7 @@ from whatsapp_automation import auto_signup_live
 
 def main(
     chat: str = typer.Argument(..., help="Group chat name"),
-    interval: int = typer.Option(5, "--interval", "-i", help="Poll interval seconds"),
+    interval: int = typer.Option(1, "--interval", "-i", help="Poll interval seconds"),
 ):
     setup_logging()
     async def run():
