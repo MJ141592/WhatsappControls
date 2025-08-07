@@ -567,7 +567,7 @@ def _parse_signup_list(text: str):
     for ln in lines:
         m = pattern.match(ln)
         if not m:
-            return None
+            break  # allow extra commentary or footer after the list
         nums.append(int(m.group(1)))
         bullets.append(m.group(2).strip())  # may be empty
     # verify numbering sequential starting at 1
@@ -614,6 +614,8 @@ async def auto_signup_live(
                 continue
             parsed = _parse_signup_list(latest.content)
             if not parsed:
+                print("Not parsed correctly")
+                print(key)
                 processed.add(key)  # not a list – mark so we don't re-parse
                 await asyncio.sleep(poll_interval)
                 continue
