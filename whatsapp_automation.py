@@ -564,16 +564,19 @@ def _parse_signup_list(text: str):
     pattern = re.compile(r"^(\d+)\)\s*(.*)$")
     bullets = []
     nums = []
-    for ln in lines:
+    tail_lines: list[str] = []
+    for idx, ln in enumerate(lines):
         m = pattern.match(ln)
         if not m:
-            break  # allow extra commentary or footer after the list
+            # everything from here to end is extra commentary/footer
+            tail_lines = lines[idx:]
+            break  # stop parsing bullets
         nums.append(int(m.group(1)))
         bullets.append(m.group(2).strip())  # may be empty
     # verify numbering sequential starting at 1
     if nums != list(range(1, len(nums) + 1)):
         return None
-    return len(bullets), bullets
+    return len(bullets), bullets, tail_lines
 
 
 async def auto_signup_live(
@@ -595,15 +598,15 @@ async def auto_signup_live(
             return
 
         # Mark all current messages as processed so we only handle NEW messages
-        # for m in automation.get_recent_messages(50):
-        #     processed.add(m.content)
+        for m in automation.get_recent_messages(50):
+            processed.add(m.content)
 
         start_time = datetime.now()
 
         while True:
             msgs = automation.get_recent_messages(5)
             # look at newest incoming message after script started
-            incoming = [m for m in msgs if not m.is_outgoing]# and m.timestamp > start_time]
+            incoming = [m for m in msgs if (not m.is_outgoing) and (m.timestamp > start_time)]
             if not incoming:
                 await asyncio.sleep(poll_interval)
                 continue
@@ -619,7 +622,7 @@ async def auto_signup_live(
                 processed.add(key)  # not a list – mark so we don't re-parse
                 await asyncio.sleep(poll_interval)
                 continue
-            total_bullets, names = parsed
+            total_bullets, names, tail_lines = parsed
             filled = [n for n in names if n]
             # require at least 3 names already and ensure we're not already on it
             if my_name in names: # len(filled) < 3 or, could sign up after first
@@ -642,8 +645,8 @@ async def auto_signup_live(
                     bullet_start += 1
                 header_lines = raw_lines[:bullet_start]
 
-                lines = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
-                reply_text = "\n".join(header_lines + lines)
+                lines_out = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
+                reply_text = "\n".join(header_lines + lines_out + (tail_lines or []))
                 if automation.send_message(reply_text):
                     logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
                     processed.add(key)
