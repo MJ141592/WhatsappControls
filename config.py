@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # WhatsApp Configuration
     whatsapp_phone_number: str = Field(default="", description="Your WhatsApp phone number")
     chrome_profile_path: str = Field(default="", description="Path to Chrome profile directory")
+    signup_my_name: str = Field(default="Matthew", description="Display name used when auto-signing up")
     
     # LLM Configuration
     default_llm_provider: Literal["openai", "anthropic"] = Field(default="openai")
