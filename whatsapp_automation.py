@@ -16,6 +16,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, ElementNotInteractableException, NoSuchElementException
 from loguru import logger
 import html
+import subprocess
+from selenium.webdriver.common.action_chains import ActionChains
 
 from config import settings
 from llm_client import LLMManager
@@ -185,27 +187,74 @@ class WhatsAppAutomation:
             message_box.click()
             message_box.clear()
 
-            # Prefer operating on the innermost editable node
-            target_elem = message_box
+            target_elem = message_box  # ensure we write into the observed compose box
+
+            # Try fast human-like paste first (works best in non-headless)
+            inserted = False
             try:
-                inner = message_box.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"]')
-                if inner and inner.is_displayed():
-                    target_elem = inner
+                try:
+                    self.driver.execute_cdp_cmd('Browser.grantPermissions', {
+                        'origin': 'https://web.whatsapp.com',
+                        'permissions': ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+                    })
+                except Exception:
+                    pass
+
+                # Write to clipboard via async script, then paste with Ctrl+V
+                try:
+                    res = self.driver.execute_async_script(
+                        """
+                        const txt = arguments[0];
+                        const cb = arguments[arguments.length-1];
+                        (async () => {
+                          try { await navigator.clipboard.writeText(txt); cb(true); }
+                          catch(e) { cb('ERR:' + (e && e.message ? e.message : 'unknown')); }
+                        })();
+                        """,
+                        message,
+                    )
+                except Exception as e:
+                    res = f"ERR:{e}"
+
+                if res is True:
+                    ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('v').key_up(Keys.CONTROL).perform()
+                    try:
+                        WebDriverWait(self.driver, 0.6).until(
+                            lambda d: (target_elem.get_attribute('innerText') or '').strip() != ''
+                        )
+                        inserted = True
+                    except Exception:
+                        inserted = False
+                else:
+                    # Fallback: OS clipboard via xclip if available
+                    try:
+                        subprocess.run(['xclip', '-selection', 'clipboard'], input=message.encode('utf-8'), check=True)
+                        ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('v').key_up(Keys.CONTROL).perform()
+                        try:
+                            WebDriverWait(self.driver, 0.6).until(
+                                lambda d: (target_elem.get_attribute('innerText') or '').strip() != ''
+                            )
+                            inserted = True
+                        except Exception:
+                            inserted = False
+                    except Exception:
+                        inserted = False
             except Exception:
-                pass
+                inserted = False
 
             # One-shot insert of the full message for speed and emoji safety
-            if "\n" in message:
+            if not inserted and "\n" in message:
                 # Preserve spacing explicitly with <br> tags for multiline messages
                 html_msg = html.escape(message).replace("\n", "<br>")
                 self.driver.execute_script(
                     "arguments[0].innerHTML = arguments[1];"
-                    "var evt = new InputEvent('input', {bubbles: true});"
-                    "arguments[0].dispatchEvent(evt);",
+                    "arguments[0].dispatchEvent(new Event('beforeinput', {bubbles:true}));"
+                    "arguments[0].dispatchEvent(new InputEvent('input', {bubbles: true}));"
+                    "arguments[0].dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
                     target_elem,
                     html_msg,
                 )
-            else:
+            elif not inserted:
                 try:
                     self.driver.execute_script(
                         "var el = arguments[0];"
@@ -222,23 +271,57 @@ class WhatsAppAutomation:
                     html_msg = html.escape(message).replace("\n", "<br>")
                     self.driver.execute_script(
                         "arguments[0].innerHTML = arguments[1];"
-                        "var evt = new InputEvent('input', {bubbles: true});"
-                        "arguments[0].dispatchEvent(evt);",
+                        "arguments[0].dispatchEvent(new Event('beforeinput', {bubbles:true}));"
+                        "arguments[0].dispatchEvent(new InputEvent('input', {bubbles: true}));"
+                        "arguments[0].dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
                         target_elem,
                         html_msg,
                     )
 
-            # Verify content landed; if not, final fallback to typing
+            # Give WA a very short window to reflect the inserted content
             try:
-                landed = (target_elem.text or '').strip()
+                WebDriverWait(self.driver, 0.6).until(
+                    lambda d: d.execute_script(
+                        "return (arguments[0].innerText && arguments[0].innerText.trim().length) ||"
+                        "(arguments[0].innerHTML && arguments[0].innerHTML.trim().length);",
+                        target_elem,
+                    )
+                )
             except Exception:
-                landed = ''
-            if not landed:
-                for idx, part in enumerate(message.split('\n')):
-                    if part:
-                        target_elem.send_keys(part)
-                    if idx < len(message.split('\n')) - 1:
-                        target_elem.send_keys(Keys.SHIFT, Keys.ENTER)
+                pass
+ 
+            # Verify content landed; if not, try a JS Range-based insertion (no typing)
+            try:
+                landed_text = (target_elem.get_attribute('innerText') or '').strip()
+                if not landed_text:
+                    # Build content via DOM nodes to avoid keystroke fallback
+                    self.driver.execute_script(
+                        "var el=arguments[0]; var txt=arguments[1];"
+                        "el.focus(); el.innerHTML='';"
+                        "var parts = txt.split('\n');"
+                        "for (var i=0;i<parts.length;i++){"
+                        "  el.appendChild(document.createTextNode(parts[i]));"
+                        "  if (i<parts.length-1){ el.appendChild(document.createElement('br')); }"
+                        "}"
+                        "el.dispatchEvent(new Event('beforeinput', {bubbles:true}));"
+                        "el.dispatchEvent(new InputEvent('input', {bubbles:true}));"
+                        "el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
+                        target_elem,
+                        message,
+                    )
+                    try:
+                        WebDriverWait(self.driver, 0.8).until(
+                            lambda d: d.execute_script(
+                                "return (arguments[0].innerText && arguments[0].innerText.trim().length);",
+                                target_elem,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    landed_text = (target_elem.get_attribute('innerText') or '').strip()
+            except Exception:
+                landed_text = ''
+            # No per-line typing fallback to avoid latency
 
             # Send by clicking the send button (faster and more reliable than Enter)
             sent = False
