@@ -185,11 +185,18 @@ class WhatsAppAutomation:
             message_box.click()
             message_box.clear()
 
-            # ChromeDriver's send_keys chokes on supplementary-plane characters (e.g. many emojis).
-            # If we detect any, set the compose box's HTML directly and hit Enter.
-            if any(ord(ch) > 0xFFFF for ch in message):
+            # One-shot insert of the full message for speed and emoji safety
+            try:
+                self.driver.execute_script(
+                    "arguments[0].focus();"
+                    "document.execCommand('selectAll', false, null);"
+                    "document.execCommand('insertText', false, arguments[1]);",
+                    message_box,
+                    message,
+                )
+            except Exception:
+                # Fallback: set HTML with <br> for newlines and dispatch input
                 html_msg = html.escape(message).replace("\n", "<br>")
-                # Inject HTML and dispatch an input event so React sees the change
                 self.driver.execute_script(
                     "arguments[0].innerHTML = arguments[1];"
                     "var evt = new InputEvent('input', {bubbles: true});"
@@ -197,26 +204,33 @@ class WhatsAppAutomation:
                     message_box,
                     html_msg,
                 )
-                # Click the send button explicitly
+
+            # Send by clicking the send button (faster and more reliable than Enter)
+            sent = False
+            for sel in [
+                'span[data-testid="send"]',
+                'button[data-testid="compose-btn-send"]',
+                'div[data-testid="compose-btn-send"]',
+                'div[aria-label="Send"]',
+            ]:
                 try:
-                    send_btn = self.driver.find_element(By.CSS_SELECTOR, 'span[data-testid="send"]')
-                    self.driver.execute_script("arguments[0].click();", send_btn)
+                    send_btn = self.driver.find_element(By.CSS_SELECTOR, sel)
+                    if send_btn and send_btn.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", send_btn)
+                        sent = True
+                        break
                 except Exception:
-                    # fallback: hit Enter
-                    message_box.send_keys(Keys.RETURN)
-                time.sleep(1)
-                logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}… (JS inject)")
-                return True
-            lines = message.split("\n")
-            for idx, part in enumerate(lines):
-                if part:
-                    message_box.send_keys(part)
-                if idx < len(lines) - 1:
-                    # Shift+Enter for new line without sending
-                    message_box.send_keys(Keys.SHIFT, Keys.ENTER)
-            message_box.send_keys(Keys.RETURN)
-            time.sleep(1)
-            logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}…")
+                    continue
+            if not sent:
+                message_box.send_keys(Keys.RETURN)
+
+            # Briefly wait for compose to clear instead of a fixed sleep
+            try:
+                WebDriverWait(self.driver, 1.5).until(lambda d: (message_box.text or '').strip() == '')
+            except Exception:
+                pass
+
+            logger.info(f"Message sent to {self._get_current_chat_name()}: {message[:50]}… (fast insert)")
             return True
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
@@ -560,23 +574,24 @@ def _parse_signup_list(text: str):
     pattern = re.compile(r"^\d+\)\s*")
     while start < len(raw_lines) and not pattern.match(raw_lines[start]):
         start += 1
-    lines = [l for l in raw_lines[start:] if l]
+    # Do not filter out empty lines; we want to preserve spacing in the tail
+    lines = raw_lines[start:]
     pattern = re.compile(r"^(\d+)\)\s*(.*)$")
     bullets = []
     nums = []
-    tail_lines: list[str] = []
+    tail_text = ""
     for idx, ln in enumerate(lines):
         m = pattern.match(ln)
         if not m:
-            # everything from here to end is extra commentary/footer
-            tail_lines = lines[idx:]
+            # everything from here to end is extra commentary/footer (preserve verbatim spacing)
+            tail_text = "\n".join(lines[idx:])
             break  # stop parsing bullets
         nums.append(int(m.group(1)))
         bullets.append(m.group(2).strip())  # may be empty
     # verify numbering sequential starting at 1
     if nums != list(range(1, len(nums) + 1)):
         return None
-    return len(bullets), bullets, tail_lines
+    return len(bullets), bullets, tail_text
 
 
 async def auto_signup_live(
@@ -622,7 +637,7 @@ async def auto_signup_live(
                 processed.add(key)  # not a list – mark so we don't re-parse
                 await asyncio.sleep(poll_interval)
                 continue
-            total_bullets, names, tail_lines = parsed
+            total_bullets, names, tail_text = parsed
             filled = [n for n in names if n]
             # require at least 3 names already and ensure we're not already on it
             if my_name in names: # len(filled) < 3 or, could sign up after first
@@ -646,7 +661,11 @@ async def auto_signup_live(
                 header_lines = raw_lines[:bullet_start]
 
                 lines_out = [f"{i+1}) {names[i] if i < len(names) else ''}" for i in range(total_bullets)]
-                reply_text = "\n".join(header_lines + lines_out + (tail_lines or []))
+                reply_text = "\n".join(header_lines + lines_out)
+                if tail_text:
+                    if not reply_text.endswith("\n"):
+                        reply_text += "\n"
+                    reply_text += tail_text
                 if automation.send_message(reply_text):
                     logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
                     processed.add(key)
