@@ -186,16 +186,8 @@ class WhatsAppAutomation:
             message_box.clear()
 
             # One-shot insert of the full message for speed and emoji safety
-            try:
-                self.driver.execute_script(
-                    "arguments[0].focus();"
-                    "document.execCommand('selectAll', false, null);"
-                    "document.execCommand('insertText', false, arguments[1]);",
-                    message_box,
-                    message,
-                )
-            except Exception:
-                # Fallback: set HTML with <br> for newlines and dispatch input
+            if "\n" in message:
+                # Preserve spacing explicitly with <br> tags for multiline messages
                 html_msg = html.escape(message).replace("\n", "<br>")
                 self.driver.execute_script(
                     "arguments[0].innerHTML = arguments[1];"
@@ -204,6 +196,25 @@ class WhatsAppAutomation:
                     message_box,
                     html_msg,
                 )
+            else:
+                try:
+                    self.driver.execute_script(
+                        "arguments[0].focus();"
+                        "document.execCommand('selectAll', false, null);"
+                        "document.execCommand('insertText', false, arguments[1]);",
+                        message_box,
+                        message,
+                    )
+                except Exception:
+                    # Fallback: set HTML with <br> for safety
+                    html_msg = html.escape(message).replace("\n", "<br>")
+                    self.driver.execute_script(
+                        "arguments[0].innerHTML = arguments[1];"
+                        "var evt = new InputEvent('input', {bubbles: true});"
+                        "arguments[0].dispatchEvent(evt);",
+                        message_box,
+                        html_msg,
+                    )
 
             # Send by clicking the send button (faster and more reliable than Enter)
             sent = False
@@ -667,6 +678,8 @@ async def auto_signup_live(
                         reply_text += "\n"
                     reply_text += tail_text
                 if automation.send_message(reply_text):
+                    # Give WhatsApp time to send before tearing down the session
+                    await asyncio.sleep(2)
                     logger.info("Auto-signed up. Added '%s' at position %d", my_name, names.index(my_name) + 1)
                     processed.add(key)
                     break  # message sent – exit loop
