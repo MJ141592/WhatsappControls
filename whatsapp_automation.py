@@ -185,6 +185,15 @@ class WhatsAppAutomation:
             message_box.click()
             message_box.clear()
 
+            # Prefer operating on the innermost editable node
+            target_elem = message_box
+            try:
+                inner = message_box.find_element(By.CSS_SELECTOR, 'div[contenteditable="true"]')
+                if inner and inner.is_displayed():
+                    target_elem = inner
+            except Exception:
+                pass
+
             # One-shot insert of the full message for speed and emoji safety
             if "\n" in message:
                 # Preserve spacing explicitly with <br> tags for multiline messages
@@ -193,16 +202,19 @@ class WhatsAppAutomation:
                     "arguments[0].innerHTML = arguments[1];"
                     "var evt = new InputEvent('input', {bubbles: true});"
                     "arguments[0].dispatchEvent(evt);",
-                    message_box,
+                    target_elem,
                     html_msg,
                 )
             else:
                 try:
                     self.driver.execute_script(
-                        "arguments[0].focus();"
-                        "document.execCommand('selectAll', false, null);"
+                        "var el = arguments[0];"
+                        "el.focus();"
+                        "var sel = window.getSelection(); sel.removeAllRanges();"
+                        "var range = document.createRange(); range.selectNodeContents(el);"
+                        "sel.addRange(range);"
                         "document.execCommand('insertText', false, arguments[1]);",
-                        message_box,
+                        target_elem,
                         message,
                     )
                 except Exception:
@@ -212,9 +224,21 @@ class WhatsAppAutomation:
                         "arguments[0].innerHTML = arguments[1];"
                         "var evt = new InputEvent('input', {bubbles: true});"
                         "arguments[0].dispatchEvent(evt);",
-                        message_box,
+                        target_elem,
                         html_msg,
                     )
+
+            # Verify content landed; if not, final fallback to typing
+            try:
+                landed = (target_elem.text or '').strip()
+            except Exception:
+                landed = ''
+            if not landed:
+                for idx, part in enumerate(message.split('\n')):
+                    if part:
+                        target_elem.send_keys(part)
+                    if idx < len(message.split('\n')) - 1:
+                        target_elem.send_keys(Keys.SHIFT, Keys.ENTER)
 
             # Send by clicking the send button (faster and more reliable than Enter)
             sent = False
@@ -233,11 +257,11 @@ class WhatsAppAutomation:
                 except Exception:
                     continue
             if not sent:
-                message_box.send_keys(Keys.RETURN)
+                target_elem.send_keys(Keys.RETURN)
 
             # Briefly wait for compose to clear instead of a fixed sleep
             try:
-                WebDriverWait(self.driver, 1.5).until(lambda d: (message_box.text or '').strip() == '')
+                WebDriverWait(self.driver, 1.5).until(lambda d: (target_elem.text or '').strip() == '')
             except Exception:
                 pass
 
