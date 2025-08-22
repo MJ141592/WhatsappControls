@@ -18,7 +18,7 @@ Quick start
 
 2) Install
 ```bash
-git clone https://github.com/yourname/WhatsappControls.git
+git clone https://github.com/MJ141592/WhatsappControls.git
 cd WhatsappControls
 python -m venv .venv
 source .venv/bin/activate
