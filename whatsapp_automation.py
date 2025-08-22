@@ -602,13 +602,27 @@ async def reply_to_contact(
             if replies_limit and sent >= replies_limit:
                 break
 
+            # Include last 30 messages before this msg as context
+            try:
+                idx = messages.index(msg)
+            except ValueError:
+                idx = 0
+            prior = messages[max(0, idx - 30):idx]
+            history = []
+            for e in prior:
+                if e.is_outgoing:
+                    history.append({"role": "assistant", "content": e.content})
+                else:
+                    history.append({"role": "user", "content": f"From {e.sender}: {e.content}"})
+
             response = await automation.llm_manager.generate_whatsapp_response(
-                msg.content, msg.sender, []
+                msg.content, msg.sender, history
             )
 
             if automation.send_message(response):
                 sent += 1
                 logger.info("Sent auto-reply %s/%s", sent, replies_limit or '∞')
+                await asyncio.sleep(1)
 
         return sent
 
@@ -661,12 +675,26 @@ async def live_reply(
                 if sender_alias and m.sender.lower() != sender_alias.lower():
                     continue
 
+                # Build brief context: last 30 messages before current m
+                try:
+                    idx = msgs.index(m)
+                except ValueError:
+                    idx = 0
+                prior = msgs[max(0, idx - 30):idx]
+                history = []
+                for e in prior:
+                    if e.is_outgoing:
+                        history.append({"role": "assistant", "content": e.content})
+                    else:
+                        history.append({"role": "user", "content": f"From {e.sender}: {e.content}"})
+
                 response = await automation.llm_manager.generate_whatsapp_response(
-                    m.content, m.sender, []
+                    m.content, m.sender, history
                 )
                 if automation.send_message(response):
                     processed.add(mid)
                     logger.info("Replied to message at %s", m.timestamp.strftime("%H:%M:%S"))
+                    await asyncio.sleep(1)
 
             await asyncio.sleep(poll_interval)
 
