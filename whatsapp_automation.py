@@ -613,7 +613,7 @@ async def reply_to_contact(
                 if e.is_outgoing:
                     history.append({"role": "assistant", "content": e.content})
                 else:
-                    history.append({"role": "user", "content": f"From {e.sender}: {e.content}"})
+                    history.append({"role": "user", "content": f"{e.sender}: {e.content}"})
 
             response = await automation.llm_manager.generate_whatsapp_response(
                 msg.content, msg.sender, history
@@ -686,7 +686,7 @@ async def live_reply(
                     if e.is_outgoing:
                         history.append({"role": "assistant", "content": e.content})
                     else:
-                        history.append({"role": "user", "content": f"From {e.sender}: {e.content}"})
+                        history.append({"role": "user", "content": f"{e.sender}: {e.content}"})
 
                 response = await automation.llm_manager.generate_whatsapp_response(
                     m.content, m.sender, history

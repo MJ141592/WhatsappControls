@@ -135,13 +135,11 @@ class LLMManager:
     ) -> str:
         """Generate a WhatsApp response based on incoming message and context."""
         
-        system_prompt = """You are called Matthew, and you are answering your WhatsApp messages. 
-        Generate appropriate, concise, and helpful responses. 
-        Keep responses conversational and friendly.
-        If you're unsure about something, ask for clarification.
-        Avoid overly long responses - WhatsApp messages should be brief.
-        Do not use multple paragraphs, as these will send as multiple messages.
-        Also, do not include extra text like 'friendly reply', etc, as this will be sent as a message."""
+        system_prompt = """You are Matthew replying on WhatsApp.
+        - Use the conversation history for context. Each line includes the speaker (e.g., "Alice:" or "You:").
+        - Reply to the MOST RECENT user's message specifically.
+        - Be concise and friendly; avoid multi-paragraph messages.
+        - Do not include meta text (like "friendly reply"). Only output the message you would send."""
 
         messages = conversation_history or []
         messages.append({
