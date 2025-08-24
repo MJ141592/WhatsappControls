@@ -1,6 +1,6 @@
-## WhatsApp Controls — Auto‑signup For Lypta
+## WhatsApp Controls — Auto‑signup For Tennis Groupchats
 
-Automate sign‑ups in Lypta WhatsApp groupchats by watching a numbered list and inserting your name automatically.
+Automate sign‑ups in Lypta Tennis WhatsApp groupchats by watching a numbered list and inserting your name automatically.
 To use this, do the setup in advance, then leave the auto signup program running while waiting for the signups to open.
 
 ## Requirements
@@ -31,7 +31,7 @@ python auto_signup.py "Group Chat Name" --my-name "Your Name"
 - The script uses a local `./whatsapp_profile` directory by default and will create it if missing. Log in to WhatsApp Web when Chrome opens the first time.
 - ChromeDriver must be installed and compatible with your Chrome version (the code expects it at `/usr/bin/chromedriver`).
 
-## Whatsapp Controls - Automated LLM answers (optional, not required for Lypta signups)
+## Whatsapp Controls - Automated LLM answers (optional, not required for tennis signups)
 
 Make a .env file in the WhatsappControls directory. See .env.example for an example. Add these variables:
 ```bash
