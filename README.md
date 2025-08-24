@@ -1,22 +1,12 @@
-# WhatsApp Controls (slim)
+## WhatsApp Controls — Auto‑signup
 
-Automates WhatsApp Web with Selenium and plugs into Anthropic to help reply to chats and maintain simple signup lists.
+Automate sign‑ups in a WhatsApp group by watching a numbered list and inserting your name automatically.
 
-Important notes
-- This codebase was largely vibe‑coded with supervision and subsequent edits. It currently has bugs and very messy code, but works for me using Anthropic's API for answering messages automatically, and automatically signing up for an event in a certain groupchat.
-
-What’s included
-- WhatsApp Web automation: open chat, read recent messages, send replies
-- Auto‑reply loops: reply live to incoming messages with LLM context (last 30 msgs)
-- Auto‑signup helper: watches a numbered list and adds your name when conditions are met
-- Config via .env (Pydantic): Anthropic key, Chrome profile path, your signup display name
-
-Quick start
-1) Requirements
+## Requirements
 - Python 3.9+
-- Google Chrome + matching ChromeDriver
+- Google Chrome and a matching ChromeDriver (ensure Chrome is logged in with WhatsApp Web)
 
-2) Install
+## Install
 ```bash
 git clone https://github.com/MJ141592/WhatsappControls.git
 cd WhatsappControls
@@ -25,59 +15,49 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3) Configure
-Create .env in the repo root:
+## Configure (.env)
 ```bash
-ANTHROPIC_API_KEY=...
-
-# WhatsApp session (Chrome user data dir) — reuse a logged‑in profile
+# Reuse an existing Chrome user data dir that is already logged into WhatsApp Web
 CHROME_PROFILE_PATH=/home/you/chrome_profile
 
-# Name to add to signup lists
+# The display name to insert into signup lists
 SIGNUP_MY_NAME=Your Name
-
-# LLM config
-ANTHROPIC_MODEL=claude-3-sonnet-20240229
-MAX_TOKENS=1000
-TEMPERATURE=0.7
 ```
 
-4) Run
-- Auto‑signup in a group (watches for lists and inserts your name):
+## Run auto‑signup
 ```bash
 python auto_signup.py "Group Chat Name"
 ```
-- Live auto‑reply for a chat (uses last 30 messages as context):
+- The script polls the group. When it sees a numbered list like:
+  1) Bob\n2) Alice\n3) \n...
+  it inserts `SIGNUP_MY_NAME` into the first empty slot, preserves any header/footer text, and sends the updated list.
+
+### Options
+- Poll interval seconds (default 1):
+```bash
+python auto_signup.py "Group Chat Name" --interval 1
+```
+- Override the name without editing .env:
+```bash
+python auto_signup.py "Group Chat Name" --my-name "Different Name"
+```
+
+## Notes
+- Ensure your Chrome profile path is correct and already logged into WhatsApp Web.
+- ChromeDriver must be installed and compatible with your Chrome version (the code expects it at `/usr/bin/chromedriver`).
+
+## Other scripts for automatic LLM answers (optional, not required for Lypta signups)
+If you want automatic, brief LLM replies (for the scripts below), add this to `.env`:
+```bash
+# Anthropic API key
+ANTHROPIC_API_KEY=...
+```
+
+- Live auto‑reply to new messages:
 ```bash
 python live_reply.py "Chat Name"
 ```
-- Reply to unanswered messages since your last message:
+- Reply to recent unanswered messages since your last message:
 ```bash
 python reply_unanswered.py "Chat Name"
 ```
-
-How it works (high level)
-- Selenium drives Chrome to WhatsApp Web with your existing logged‑in profile.
-- Message reads try to preserve emojis by parsing innerHTML and replacing <img alt> emoji.
-- Sending avoids slow key‑by‑key typing: it inserts the whole message quickly and clicks send.
-- LLM calls are wrapped via `LLMManager`; we pass a short conversation history for context.
-
-Tips
-- Use a persistent Chrome profile dir so you don’t have to re‑scan the QR each run.
-- For always‑on usage, run on a small Linux VM with a systemd service.
-- If you need to handle multiple chats sequentially:
-```bash
-python auto_signup.py "A" && python auto_signup.py "B"
-```
-
-Project layout
-- `whatsapp_automation.py`  Core automation and helpers
-- `llm_client.py`           Anthropic client and manager
-- `auto_signup.py`          CLI wrapper for the auto‑signup loop
-- `live_reply.py`           CLI for continuous auto‑reply
-- `reply_unanswered.py`     CLI to reply to recent unanswered messages
-- `config.py`               Pydantic settings (.env → Settings)
-
-License / Disclaimer
-- Educational use only. You are responsible for complying with WhatsApp’s ToS.
-- No warranties. This is pragmatic automation code; expect occasional rough edges. 
