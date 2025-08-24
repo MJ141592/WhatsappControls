@@ -1,4 +1,4 @@
-## WhatsApp Controls — Auto‑signup
+## WhatsApp Controls — Auto‑signup For Lypta
 
 Automate sign‑ups in Lypta WhatsApp groupchats by watching a numbered list and inserting your name automatically.
 To use this, do the setup in advance, then leave the auto signup program running while waiting for the signups to open.
