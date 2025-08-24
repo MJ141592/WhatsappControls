@@ -1,11 +1,9 @@
-"""LLM client for generating responses using OpenAI or Anthropic APIs."""
+"""LLM client for generating responses using the Anthropic API."""
 
-import asyncio
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from abc import ABC, abstractmethod
 
 import httpx  # added for custom client with Anthropic
-import openai
 import anthropic
 from loguru import logger
 
@@ -23,40 +21,6 @@ class LLMClient(ABC):
     ) -> str:
         """Generate a response from the LLM."""
         pass
-
-
-class OpenAIClient(LLMClient):
-    """OpenAI API client."""
-    
-    def __init__(self):
-        self.client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
-    
-    async def generate_response(
-        self, 
-        messages: List[Dict[str, str]], 
-        system_prompt: Optional[str] = None
-    ) -> str:
-        """Generate a response using OpenAI's API."""
-        try:
-            formatted_messages = []
-            
-            if system_prompt:
-                formatted_messages.append({"role": "system", "content": system_prompt})
-            
-            formatted_messages.extend(messages)
-            
-            response = await self.client.chat.completions.create(
-                model=settings.openai_model,
-                messages=formatted_messages,
-                max_tokens=settings.max_tokens,
-                temperature=settings.temperature
-            )
-            
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise
 
 
 # --- Updated to supply our own httpx client (new httpx>=0.28 no longer supports
@@ -119,13 +83,8 @@ class LLMManager:
         self.client = self._create_client()
     
     def _create_client(self) -> LLMClient:
-        """Create the appropriate LLM client based on configuration."""
-        if settings.default_llm_provider == "openai":
-            return OpenAIClient()
-        elif settings.default_llm_provider == "anthropic":
-            return AnthropicClient()
-        else:
-            raise ValueError(f"Unsupported LLM provider: {settings.default_llm_provider}")
+        """Create the Anthropic LLM client."""
+        return AnthropicClient()
     
     async def generate_whatsapp_response(
         self, 

@@ -1,6 +1,6 @@
-# WhatsApp Controls
+# WhatsApp Controls (slim)
 
-Automates WhatsApp Web with Selenium and plugs into LLMs (OpenAI/Anthropic) to help reply to chats and maintain simple signup lists.
+Automates WhatsApp Web with Selenium and plugs into Anthropic to help reply to chats and maintain simple signup lists.
 
 Important notes
 - This codebase was largely vibe‑coded with supervision and subsequent edits. It currently has bugs and very messy code, but works for me using Anthropic's API for answering messages automatically, and automatically signing up for an event in a certain groupchat.
@@ -9,7 +9,7 @@ What’s included
 - WhatsApp Web automation: open chat, read recent messages, send replies
 - Auto‑reply loops: reply live to incoming messages with LLM context (last 30 msgs)
 - Auto‑signup helper: watches a numbered list and adds your name when conditions are met
-- Config via .env (Pydantic): API keys, Chrome profile path, your signup display name
+- Config via .env (Pydantic): Anthropic key, Chrome profile path, your signup display name
 
 Quick start
 1) Requirements
@@ -28,9 +28,6 @@ pip install -r requirements.txt
 3) Configure
 Create .env in the repo root:
 ```bash
-# One of these must be provided
-OPENAI_API_KEY=...
-# or
 ANTHROPIC_API_KEY=...
 
 # WhatsApp session (Chrome user data dir) — reuse a logged‑in profile
@@ -39,9 +36,9 @@ CHROME_PROFILE_PATH=/home/you/chrome_profile
 # Name to add to signup lists
 SIGNUP_MY_NAME=Your Name
 
-# Optional provider config
-DEFAULT_LLM_PROVIDER=openai
-OPENAI_MODEL=gpt-4-turbo-preview
+# LLM config
+ANTHROPIC_MODEL=claude-3-sonnet-20240229
+MAX_TOKENS=1000
 TEMPERATURE=0.7
 ```
 
@@ -50,9 +47,13 @@ TEMPERATURE=0.7
 ```bash
 python auto_signup.py "Group Chat Name"
 ```
-- Live auto‑reply for a chat (1s polling, uses last 30 messages as context):
+- Live auto‑reply for a chat (uses last 30 messages as context):
 ```bash
-python -c "import asyncio, whatsapp_automation as w; asyncio.run(w.live_reply(chat_name='Andy'))"
+python live_reply.py "Chat Name"
+```
+- Reply to unanswered messages since your last message:
+```bash
+python reply_unanswered.py "Chat Name"
 ```
 
 How it works (high level)
@@ -71,8 +72,10 @@ python auto_signup.py "A" && python auto_signup.py "B"
 
 Project layout
 - `whatsapp_automation.py`  Core automation and helpers
-- `llm_client.py`           OpenAI/Anthropic clients and manager
+- `llm_client.py`           Anthropic client and manager
 - `auto_signup.py`          CLI wrapper for the auto‑signup loop
+- `live_reply.py`           CLI for continuous auto‑reply
+- `reply_unanswered.py`     CLI to reply to recent unanswered messages
 - `config.py`               Pydantic settings (.env → Settings)
 
 License / Disclaimer

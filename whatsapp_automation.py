@@ -495,59 +495,7 @@ class WhatsAppAutomation:
             self.driver = None
         
 
-# Simple convenience functions
-async def send_message_to_contact(contact_name: str, message: str, chat_type: str = "individual") -> bool:
-    """Send message to a contact or group.
-    
-    Args:
-        contact_name: Name/number of contact or group name
-        message: Message to send
-        chat_type: "individual" for direct messages, "group" for group chats
-    """
-    automation = WhatsAppAutomation()
-    
-    try:
-        await automation.start()
-        
-        if automation.select_chat(contact_name, chat_type):
-            result = automation.send_message(message)
-            await automation.stop()
-            return result
-        else:
-            await automation.stop()
-            return False
-            
-    except Exception as e:
-        logger.error(f"Failed to send message: {e}")
-        await automation.stop()
-        return False
-
-
-async def get_chat_messages(contact_name: str, limit: int = 10, chat_type: str = "individual") -> List[WhatsAppMessage]:
-    """Get messages from a contact or group.
-    
-    Args:
-        contact_name: Name/number of contact or group name
-        limit: Number of messages to retrieve
-        chat_type: "individual" for direct messages, "group" for group chats
-    """
-    automation = WhatsAppAutomation()
-    
-    try:
-        await automation.start()
-        
-        if automation.select_chat(contact_name, chat_type):
-            messages = automation.get_recent_messages(limit)
-            await automation.stop()
-            return messages
-        else:
-            await automation.stop()
-            return []
-            
-    except Exception as e:
-        logger.error(f"Failed to get messages: {e}")
-        await automation.stop()
-        return [] 
+# Simple convenience functions (removed unused send/get helpers)
 
 
 # ------------------------------------------------------------
