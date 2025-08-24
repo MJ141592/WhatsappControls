@@ -1,6 +1,7 @@
 ## WhatsApp Controls — Auto‑signup
 
 Automate sign‑ups in Lypta WhatsApp groupchats by watching a numbered list and inserting your name automatically.
+To use this, do the setup in advance, then leave the auto signup program running while waiting for the 
 
 ## Requirements
 - Python 3.9+
@@ -30,8 +31,10 @@ python auto_signup.py "Group Chat Name" --my-name "Your Name"
 - The script uses a local `./whatsapp_profile` directory by default and will create it if missing. Log in to WhatsApp Web when Chrome opens the first time.
 - ChromeDriver must be installed and compatible with your Chrome version (the code expects it at `/usr/bin/chromedriver`).
 
-## Optional: .env configuration
-You can store settings in a `.env` file at the repo root instead of passing flags:
+## Whatsapp Controls - Automated LLM answers (optional, not required for Lypta signups)
+
+## .env configuration
+See .env.example for an example. Make a .env file in the WhatsappControls directory, and add these variables:
 ```bash
 # The display name to insert into signup lists, and as context for LLM generated messages
 SIGNUP_MY_NAME=Your Name
@@ -40,14 +43,11 @@ SIGNUP_MY_NAME=Your Name
 ANTHROPIC_API_KEY=...
 ```
 
-## Other scripts for automatic LLM answers (optional, not required for Lypta signups)
-This requires the Anthropic API key in the setup
-
-- Live auto‑reply to new messages:
+- Live auto‑reply to new messages in a chat:
 ```bash
 python live_reply.py "Chat Name"
 ```
-- Reply to recent unanswered messages since your last message:
+- Reply to recent unanswered messages since your last message in a chat:
 ```bash
 python reply_unanswered.py "Chat Name"
 ```
