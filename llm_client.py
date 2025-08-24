@@ -9,7 +9,6 @@ from loguru import logger
 
 from config import settings
 
-
 class LLMClient(ABC):
     """Abstract base class for LLM clients."""
     
@@ -22,12 +21,10 @@ class LLMClient(ABC):
         """Generate a response from the LLM."""
         pass
 
-
 # --- Updated to supply our own httpx client (new httpx>=0.28 no longer supports
 #     the deprecated `proxies=` argument that Anthropic passes by default). By
 #     giving an `http_client` ourselves we bypass that inner logic and maintain
 #     compatibility without downgrading httpx.
-
 
 class AnthropicClient(LLMClient):
     """Anthropic API client."""
@@ -75,7 +72,6 @@ class AnthropicClient(LLMClient):
         """Cleanly close the underlying httpx client when done."""
         await self._httpx_client.aclose()
 
-
 class LLMManager:
     """Manager class for LLM operations."""
     
@@ -94,7 +90,7 @@ class LLMManager:
     ) -> str:
         """Generate a WhatsApp response based on incoming message and context."""
         
-        system_prompt = """You are Matthew, a maths graduate, replying on WhatsApp.
+        system_prompt = f"""You are {settings.signup_my_name}, replying on WhatsApp.
         - Use the conversation history for context.
         - Each line includes the speaker for information, but only output the message.
         - Reply to the MOST RECENT user's message specifically.
