@@ -9,7 +9,7 @@ from config import settings
 
 def main(
     chat: str = typer.Argument(..., help="Group chat name"),
-    interval: int = typer.Option(1, "--interval", "-i", help="Poll interval seconds"),
+    interval: int = typer.Option(10, "--interval", "-i"),
     my_name: str = typer.Option(None, "--my-name", help="Override signup display name (defaults to env)"),
 ):
     setup_logging()

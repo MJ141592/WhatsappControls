@@ -1,6 +1,7 @@
 """Simplified WhatsApp Web automation using Selenium."""
 
 import time
+import os
 import asyncio
 from typing import List, Optional
 from dataclasses import dataclass
@@ -45,8 +46,11 @@ class WhatsAppAutomation:
         """Set up Chrome WebDriver."""
         chrome_options = Options()
         
-        if settings.chrome_profile_path:
-            chrome_options.add_argument(f"--user-data-dir={settings.chrome_profile_path}")
+        # Choose profile directory: use configured path if provided, otherwise default
+        # to a local ./whatsapp_profile directory (auto-created if missing).
+        profile_dir = settings.chrome_profile_path or os.path.abspath("whatsapp_profile")
+        os.makedirs(profile_dir, exist_ok=True)
+        chrome_options.add_argument(f"--user-data-dir={profile_dir}")
         
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -690,7 +694,7 @@ def _parse_signup_list(text: str):
 
 async def auto_signup_live(
     chat_name: str,
-    poll_interval: int = 5,
+    poll_interval: int = 10,
     my_name: str = "Matthew",
 ):
     """Continuously watch group sign-up list and add *my_name* when criteria met."""

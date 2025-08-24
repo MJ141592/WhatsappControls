@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     # WhatsApp Configuration
     chrome_profile_path: str = Field(default="", description="Path to Chrome profile directory")
-    signup_my_name: str = Field(..., description="Display name used when auto-signing up")
+    signup_my_name: str = Field(default="", description="Display name used when auto-signing up")
 
     # LLM Configuration (Anthropic)
     anthropic_model: str = Field(default="claude-3-sonnet-20240229")
