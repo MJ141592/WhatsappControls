@@ -1,7 +1,7 @@
 ## WhatsApp Controls — Auto‑signup
 
 Automate sign‑ups in Lypta WhatsApp groupchats by watching a numbered list and inserting your name automatically.
-To use this, do the setup in advance, then leave the auto signup program running while waiting for the 
+To use this, do the setup in advance, then leave the auto signup program running while waiting for the signups to open.
 
 ## Requirements
 - Python 3.9+
@@ -33,8 +33,7 @@ python auto_signup.py "Group Chat Name" --my-name "Your Name"
 
 ## Whatsapp Controls - Automated LLM answers (optional, not required for Lypta signups)
 
-## .env configuration
-See .env.example for an example. Make a .env file in the WhatsappControls directory, and add these variables:
+Make a .env file in the WhatsappControls directory. See .env.example for an example. Add these variables:
 ```bash
 # The display name to insert into signup lists, and as context for LLM generated messages
 SIGNUP_MY_NAME=Your Name
