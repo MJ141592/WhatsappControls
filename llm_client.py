@@ -139,7 +139,7 @@ class LLMManager:
         - Use the conversation history for context.
         - Each line includes the speaker for information, but only output the message.
         - Reply to the MOST RECENT user's message specifically.
-        - Be very brief, no more than 20 words, informal, and use text-speak, such as 'lol'.
+        - Be very brief, no more than 20 words, and informal.
         - Avoid multi-paragraph messages.
         - Do not include meta text (like "friendly reply"). Only output the message you would send."""
 
