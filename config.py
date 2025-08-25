@@ -2,6 +2,7 @@
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from typing import Literal
 
 
 class Settings(BaseSettings):
@@ -21,8 +22,8 @@ class Settings(BaseSettings):
     chrome_profile_path: str = Field(default="", description="Path to Chrome profile directory")
     signup_my_name: str = Field(default="", description="Display name used when auto-signing up")
 
-    # LLM Configuration (Anthropic)
-    anthropic_model: str = Field(default="claude-3-sonnet-20240229")
+    # LLM Configuration
+    anthropic_model: str = Field(default="claude-sonnet-4-20250514")
     max_tokens: int = Field(default=1000)
     temperature: float = Field(default=0.7)
     
