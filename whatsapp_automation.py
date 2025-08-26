@@ -1,12 +1,10 @@
 """Simplified WhatsApp Web automation using Selenium."""
-
 import time
 import os
 import asyncio
 from typing import List, Optional
 from dataclasses import dataclass
 from datetime import datetime
-
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -22,7 +20,6 @@ from selenium.webdriver.common.action_chains import ActionChains
 
 from config import settings
 from llm_client import LLMManager
-
 
 @dataclass
 class WhatsAppMessage:
@@ -51,22 +48,18 @@ class WhatsAppAutomation:
         profile_dir = settings.chrome_profile_path or os.path.abspath("whatsapp_profile")
         os.makedirs(profile_dir, exist_ok=True)
         chrome_options.add_argument(f"--user-data-dir={profile_dir}")
-        
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
-        
         service = Service("/usr/bin/chromedriver")
         return webdriver.Chrome(service=service, options=chrome_options)
     
     async def start(self):
         """Start the WhatsApp automation."""
         logger.info("Starting WhatsApp automation...")
-        
         try:
             self.driver = self.setup_driver()
             await self.connect_to_whatsapp()
-                
         except Exception as e:
             logger.error(f"Failed to start: {e}")
             await self.stop()
@@ -76,14 +69,12 @@ class WhatsAppAutomation:
         """Connect to WhatsApp Web."""
         logger.info("Connecting to WhatsApp Web...")
         self.driver.get("https://web.whatsapp.com")
-        
         try:
             # Check if already logged in
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[aria-label*="Chat list"]'))
             )
             logger.info("Already logged in")
-            
         except TimeoutException:
             logger.info("Please scan QR code...")
             WebDriverWait(self.driver, 60).until(
@@ -418,15 +409,10 @@ class WhatsAppAutomation:
             await asyncio.sleep(5)
             self.driver.quit()
             self.driver = None
-        
-
-# Simple convenience functions (removed unused send/get helpers)
-
 
 # ------------------------------------------------------------
 # Convenience: reply to N recent incoming messages for a contact
 # ------------------------------------------------------------
-
 
 async def reply_to_contact(
     chat_name: str,
@@ -441,10 +427,8 @@ async def reply_to_contact(
     iterates over all later messages that match the given sender, replying to
     each one (up to *replies_limit* if provided).
     """
-
     automation = WhatsAppAutomation()
     sent = 0
-
     try:
         await automation.start()
 
@@ -468,10 +452,8 @@ async def reply_to_contact(
         for msg in candidates:
             if msg.is_outgoing:
                 continue  # Shouldn't happen but guard
-
             if sender_alias and msg.sender.lower() != sender_alias.lower():
                 continue
-
             if replies_limit and sent >= replies_limit:
                 break
 
@@ -498,15 +480,12 @@ async def reply_to_contact(
                 await asyncio.sleep(1)
 
         return sent
-
     finally:
         await automation.stop() 
-
 
 # ------------------------------------------------------------
 # Live reply coroutine
 # ------------------------------------------------------------
-
 
 async def live_reply(
     chat_name: str,
@@ -518,10 +497,8 @@ async def live_reply(
 
     Stops on Ctrl-C.
     """
-
     automation = WhatsAppAutomation()
     processed: set[str] = set()
-
     try:
         await automation.start()
 
@@ -576,14 +553,11 @@ async def live_reply(
     finally:
         await automation.stop() 
 
-
 # ------------------------------------------------------------
 # Auto sign-up live responder (string processing only)
 # ------------------------------------------------------------
 
-
 import re
-
 
 def _parse_signup_list(text: str):
     """Return (total_bullets, names_list) if text looks like a numbered list else None."""
@@ -611,7 +585,6 @@ def _parse_signup_list(text: str):
     if nums != list(range(1, len(nums) + 1)):
         return None
     return len(bullets), bullets, tail_text
-
 
 async def auto_signup_live(
     chat_name: str,
@@ -696,4 +669,4 @@ async def auto_signup_live(
     except KeyboardInterrupt:
         logger.info("Auto-signup stopped")
     finally:
-        await automation.stop() 
+        await automation.stop()

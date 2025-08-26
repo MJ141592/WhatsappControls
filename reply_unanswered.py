@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Reply to all unanswered messages in a chat (Typer CLI)."""
-
 import asyncio
 import typer
 from typing import Optional
 
 from utils import setup_logging, console
 from whatsapp_automation import reply_to_contact
-
 
 def main(
     chat: str = typer.Argument(..., help="Chat name / number (or group)"),
@@ -29,7 +27,6 @@ def main(
         console.print(f"✅ Replied to {sent} message(s)")
 
     asyncio.run(run())
-
 
 if __name__ == "__main__":
     typer.run(main)

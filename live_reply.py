@@ -6,7 +6,6 @@ from typing import Optional
 from utils import setup_logging, console
 from whatsapp_automation import live_reply
 
-
 def main(
     chat: str = typer.Argument(..., help="Chat name / number (or group)"),
     group: bool = typer.Option(False, "--group", "-g", help="Target a group chat"),
@@ -26,7 +25,6 @@ def main(
 
     console.print(f"🔄 Live-reply started for {chat}. Press Ctrl-C to stop.")
     asyncio.run(run())
-
 
 if __name__ == "__main__":
     typer.run(main) 
