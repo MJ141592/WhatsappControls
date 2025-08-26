@@ -153,11 +153,8 @@ class WhatsAppAutomation:
             time.sleep(1)  # small pause for chat to stabilise
 
             input_selectors = [
-                'div[contenteditable="true"][data-tab="10"]',
-                'div[contenteditable="true"][aria-label*="Type a message"]',
-                'div[contenteditable="true"][role="textbox"]',
                 'div[data-testid="conversation-compose-box-input"]',
-                'div[contenteditable="true"]',
+                'div[contenteditable="true"][data-tab="10"]',
             ]
 
             message_box = None
