@@ -189,7 +189,10 @@ class WhatsAppAutomation:
 
             # Focus and send the text followed by Enter
             message_box.click()
-            message_box.clear()
+            try:
+                message_box.clear()  # can fail for contenteditable on some Chrome versions
+            except Exception:
+                pass
 
             target_elem = message_box  # ensure we write into the observed compose box
 
@@ -221,6 +224,9 @@ class WhatsAppAutomation:
                     res = f"ERR:{e}"
 
                 if res is True:
+                    # Select-all then paste to replace any draft text
+                    ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('a').key_up(Keys.CONTROL).perform()
+                    ActionChains(self.driver).send_keys(Keys.DELETE).perform()
                     ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('v').key_up(Keys.CONTROL).perform()
                     try:
                         WebDriverWait(self.driver, 0.6).until(
@@ -233,6 +239,8 @@ class WhatsAppAutomation:
                     # Fallback: OS clipboard via xclip if available
                     try:
                         subprocess.run(['xclip', '-selection', 'clipboard'], input=message.encode('utf-8'), check=True)
+                        ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('a').key_up(Keys.CONTROL).perform()
+                        ActionChains(self.driver).send_keys(Keys.DELETE).perform()
                         ActionChains(self.driver).key_down(Keys.CONTROL, target_elem).send_keys('v').key_up(Keys.CONTROL).perform()
                         try:
                             WebDriverWait(self.driver, 0.6).until(
@@ -246,94 +254,18 @@ class WhatsAppAutomation:
             except Exception:
                 inserted = False
 
-            # One-shot insert of the full message for speed and emoji safety
-            if not inserted and "\n" in message:
-                # Preserve spacing explicitly with <br> tags for multiline messages
-                html_msg = html.escape(message).replace("\n", "<br>")
-                self.driver.execute_script(
-                    "arguments[0].innerHTML = arguments[1];"
-                    "arguments[0].dispatchEvent(new Event('beforeinput', {bubbles:true}));"
-                    "arguments[0].dispatchEvent(new InputEvent('input', {bubbles: true}));"
-                    "arguments[0].dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
-                    target_elem,
-                    html_msg,
-                )
-            elif not inserted:
-                try:
-                    self.driver.execute_script(
-                        "var el = arguments[0];"
-                        "el.focus();"
-                        "var sel = window.getSelection(); sel.removeAllRanges();"
-                        "var range = document.createRange(); range.selectNodeContents(el);"
-                        "sel.addRange(range);"
-                        "document.execCommand('insertText', false, arguments[1]);",
-                        target_elem,
-                        message,
-                    )
-                except Exception:
-                    # Fallback: set HTML with <br> for safety
-                    html_msg = html.escape(message).replace("\n", "<br>")
-                    self.driver.execute_script(
-                        "arguments[0].innerHTML = arguments[1];"
-                        "arguments[0].dispatchEvent(new Event('beforeinput', {bubbles:true}));"
-                        "arguments[0].dispatchEvent(new InputEvent('input', {bubbles: true}));"
-                        "arguments[0].dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
-                        target_elem,
-                        html_msg,
-                    )
-
-            # Give WA a very short window to reflect the inserted content
-            try:
-                WebDriverWait(self.driver, 0.6).until(
-                    lambda d: d.execute_script(
-                        "return (arguments[0].innerText && arguments[0].innerText.trim().length) ||"
-                        "(arguments[0].innerHTML && arguments[0].innerHTML.trim().length);",
-                        target_elem,
-                    )
-                )
-            except Exception:
-                pass
+            # If paste did not land, abort without attempting other insertion methods
+            if not inserted:
+                logger.error("Paste failed; aborting send to avoid slow fallbacks")
+                return False
  
-            # Verify content landed; if not, try a JS Range-based insertion (no typing)
-            try:
-                landed_text = (target_elem.get_attribute('innerText') or '').strip()
-                if not landed_text:
-                    # Build content via DOM nodes to avoid keystroke fallback
-                    self.driver.execute_script(
-                        "var el=arguments[0]; var txt=arguments[1];"
-                        "el.focus(); el.innerHTML='';"
-                        "var parts = txt.split('\n');"
-                        "for (var i=0;i<parts.length;i++){"
-                        "  el.appendChild(document.createTextNode(parts[i]));"
-                        "  if (i<parts.length-1){ el.appendChild(document.createElement('br')); }"
-                        "}"
-                        "el.dispatchEvent(new Event('beforeinput', {bubbles:true}));"
-                        "el.dispatchEvent(new InputEvent('input', {bubbles:true}));"
-                        "el.dispatchEvent(new KeyboardEvent('keyup', {bubbles:true, key:' '}));",
-                        target_elem,
-                        message,
-                    )
-                    try:
-                        WebDriverWait(self.driver, 0.8).until(
-                            lambda d: d.execute_script(
-                                "return (arguments[0].innerText && arguments[0].innerText.trim().length);",
-                                target_elem,
-                            )
-                        )
-                    except Exception:
-                        pass
-                    landed_text = (target_elem.get_attribute('innerText') or '').strip()
-            except Exception:
-                landed_text = ''
-            # No per-line typing fallback to avoid latency
+            # Content is present after paste (verified above), proceed to send
 
             # Send by clicking the send button (faster and more reliable than Enter)
             sent = False
             for sel in [
                 'span[data-testid="send"]',
                 'button[data-testid="compose-btn-send"]',
-                'div[data-testid="compose-btn-send"]',
-                'div[aria-label="Send"]',
             ]:
                 try:
                     send_btn = self.driver.find_element(By.CSS_SELECTOR, sel)
@@ -364,10 +296,6 @@ class WhatsAppAutomation:
             # Try multiple selectors for message containers
             message_selectors = [
                 '[data-testid="msg-container"]',  # Original
-                'div[class*="message"]',  # Class-based
-                'div[data-id]',  # Data-id based
-                'div[class*="copyable-text"]',  # Copyable text
-                'div[role="row"]',  # Role-based
                 'span.selectable-text'  # Direct text spans
             ]
             
@@ -401,13 +329,7 @@ class WhatsAppAutomation:
                     for text_sel in text_selectors:
                         try:
                             content_elem = elem.find_element(By.CSS_SELECTOR, text_sel)
-                            raw_html = content_elem.get_attribute("innerHTML") or ""
-                            # Replace emoji <img ... alt="😀"> with the alt value and strip other tags
-                            decoded = re.sub(r"<img[^>]+alt=['\"]([^'\"]+)['\"][^>]*>", r"\1", raw_html)
-                            decoded = re.sub(r"<[^>]+>", "", decoded).strip()
-                            # print(raw_html)
-                            print(decoded)
-                            content = decoded or content_elem.text.strip()
+                            content = content_elem.text.strip()
                             if content:
                                 break
                         except:
@@ -415,10 +337,7 @@ class WhatsAppAutomation:
                     
                     # If no content found, try getting text directly
                     if not content:
-                        raw_html = elem.get_attribute("innerHTML") or ""
-                        decoded = re.sub(r"<img[^>]+alt=['\"]([^'\"]+)['\"][^>]*>", r"\1", raw_html)
-                        decoded = re.sub(r"<[^>]+>", "", decoded).strip()
-                        content = decoded or elem.text.strip()
+                        content = elem.text.strip()
                     
                     if not content:
                         continue
@@ -495,6 +414,8 @@ class WhatsAppAutomation:
         """Stop automation and cleanup."""
         logger.info("Stopping automation...")
         if self.driver:
+            # Allow extra time for pending network/UI operations before closing
+            await asyncio.sleep(5)
             self.driver.quit()
             self.driver = None
         
