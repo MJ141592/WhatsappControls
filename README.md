@@ -2,13 +2,13 @@
 
 Automate sign‑ups in Lypta Tennis WhatsApp groupchats by watching a numbered list and inserting your name automatically.
 To use this, do the setup in advance, then leave the auto signup program running while waiting for the signups to open.
+This is intended for Linux.
 
 ## Requirements
 - Python 3.9+
 - Google Chrome and a matching ChromeDriver
 
-You will need to log onto WhatsappWeb on the first use, and potentially need to (rather quickly) click 'continue'.
-Just retry if it closes before you've done that.
+You will need to log onto WhatsappWeb on the first use, and may need to (rather quickly) click 'continue'. Just retry if you encounter issues on first use, and if that doesn't work, you can let me know.
 
 ## Install
 ```bash
